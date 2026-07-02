@@ -1,100 +1,179 @@
-## Freenove 4WD Smart Car Kit for Raspberry Pi
+## Smart Car
 
+這個 repository 是基於 Freenove 4WD Smart Car Kit for Raspberry Pi 改裝後的個人測試版本。  
+目前重點是保存整台車的功能測試、續航測試與硬體校正參數，方便日後重新部署或維修時快速確認。
 
-> A 4WD smart car kit for Raspberry Pi.
+詳細操作筆記請看：
 
-<div style="text-align: center;">
-  <img src='Picture/icon.png' width='45%' style='display:inline-block; margin-right:5px;'/>
-  <img src='Picture/icon1.png' width='40%' style='display:inline-block;'/>
-</div>
+```text
+CAR_TESTING_GUIDE.md
+```
 
-### Connection Board Version
-<table>
-  <tr>
-    <th>PCB Version</th>
-    <th>PCB Picture</th>
-  </tr>
-  <tr>
-    <td>V1.0</td>
-    <td align="center">
-      <img src='Picture/PCB_V1.0.png' width='30%' alt='V1.0'/>
-    </td>
-  </tr>
-  <tr>
-    <td>V2.0</td>
-    <td align="center">
-      <img src='Picture/PCB_V2.0.png' width='30%' alt='V2.0'/>
-    </td>
-  </tr>
-</table>
+## 目前車體改裝摘要
 
+- 馬達齒比改為 `1:120`，原本為 `1:48`
+- 2 個 Pi Camera / CSI camera
+- 3 個 USB camera
+- 車頭 2 個 servo
+- 底部 3 個循跡感測器
+- 額外 6 個紅外線避障感測器
+- 外接 USB 麥克風與喇叭
+- 電池電壓偵測與百分比估算
+- LED 目前先跳過測試
 
-### Download
+## 主要測試程式
 
-* **Use command in console**
+進入 Server 目錄：
 
-	Run following command to download all the files in this repository.
+```bash
+cd /home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server
+```
 
-	`git clone https://github.com/Freenove/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi.git`
+整車系統測試：
 
-* **Manually download in browser**
+```bash
+python3 full_car_test.py --test system
+```
 
-	Click the green "Clone or download" button, then click "Download ZIP" button in the pop-up window.
-	Do NOT click the "Open in Desktop" button, it will lead you to install Github software.
+續航壓力測試：
 
-> If you meet any difficulties, please contact our support team for help.
+```bash
+python3 endurance_test.py
+```
 
-### Support
+## 整車系統測試內容
 
-Freenove provides free and quick customer support. Including but not limited to:
+`full_car_test.py --test system` 會依序測：
 
-* Quality problems of products
-* Using Problems of products
-* Questions of learning and creation
-* Opinions and suggestions
-* Ideas and thoughts
+- 電池電壓與光敏 ADC
+- 超聲波感測器
+- 底部車道線循跡感測器
+- 額外 6 個紅外線避障感測器
+- 車頭 2 個 servo
+- 蜂鳴器
+- 外接麥克風與喇叭
+- 5 個相機
+- 基本馬達移動
+- 麥克納姆輪移動
 
-Please send an email to:
+LED 預設跳過。若之後要包含 LED：
 
-[support@freenove.com](mailto:support@freenove.com)
+```bash
+python3 full_car_test.py --test system --include-led
+```
 
-We will reply to you within one working day.
+## 已校正參數
 
-### Purchase
+馬達基本測試：
 
-Please visit the following page to purchase our products:
+```bash
+python3 full_car_test.py --test basic-drive
+```
 
-http://store.freenove.com
+目前預設校正值：
 
-Business customers please contact us through the following email address:
+```text
+turn-speed = 900
+left-turn-90-duration = 2.4
+right-turn-90-duration = 2.1
+```
 
-[sale@freenove.com](mailto:sale@freenove.com)
+額外 6 個紅外線避障感測器 GPIO：
 
-### Copyright
+```text
+GPIO26, GPIO20, GPIO19, GPIO16, GPIO6, GPIO12
+```
 
-All the files in this repository are released under [Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported License](http://creativecommons.org/licenses/by-nc-sa/3.0/).
+避障感測器目前為 LOW 觸發：
 
-![markdown](https://i.creativecommons.org/l/by-nc-sa/3.0/88x31.png)
+```text
+GPIO 讀到 LOW  -> obstacle=1
+GPIO 讀到 HIGH -> obstacle=0
+```
 
-This means you can use them on your own derived works, in part or completely. But NOT for the purpose of commercial use.
-You can find a copy of the license in this repository.
+USB 相機節點：
 
-Freenove brand and logo are copyright of Freenove Creative Technology Co., Ltd. Can't be used without formal permission.
+```text
+0,2,37
+```
 
+USB 音效卡：
 
-### About
+```text
+plughw:2,0
+```
 
-Freenove is an open-source electronics platform.
+## 續航壓力測試
 
-Freenove is committed to helping customer quickly realize the creative idea and product prototypes, making it easy to get started for enthusiasts of programing and electronics and launching innovative open source products.
+一般續航測試：
 
-Our services include:
+```bash
+python3 endurance_test.py
+```
 
-* Robot kits
-* Learning kits for Arduino, Raspberry Pi and micro:bit
-* Electronic components and modules, tools
-* Product customization service
+車子架高後，啟用馬達負載：
 
-Our code and circuit are open source. You can obtain the details and the latest information through visiting the following web site:
+```bash
+python3 endurance_test.py --enable-motor-load --yes
+```
 
-http://www.freenove.com
+先跑 10 分鐘確認流程：
+
+```bash
+python3 endurance_test.py --enable-motor-load --yes --max-minutes 10
+```
+
+停止條件：
+
+```text
+連續 3 次電壓 <= 6.8V 才停止
+```
+
+續航紀錄會輸出到：
+
+```text
+Code/Server/endurance_logs/
+```
+
+## 重開機後需要確認
+
+重開機後通常可以直接執行：
+
+```bash
+python3 full_car_test.py --test system
+```
+
+若音訊或相機失效，先確認 USB 編號是否改變。
+
+確認 USB 音效卡：
+
+```bash
+aplay -l
+arecord -l
+```
+
+確認 USB 相機：
+
+```bash
+v4l2-ctl --list-devices
+```
+
+目前穩定值：
+
+```text
+USB audio: plughw:2,0
+USB cameras: 0,2,37
+```
+
+## 重要檔案
+
+```text
+CAR_TESTING_GUIDE.md
+Code/Server/full_car_test.py
+Code/Server/endurance_test.py
+Code/Server/params.json
+```
+
+## 原始專案來源
+
+本專案基於 Freenove 4WD Smart Car Kit for Raspberry Pi 修改。原始教學、PDF、圖片與範例程式仍保留在 repository 內，方便查閱硬體接線與官方說明。
