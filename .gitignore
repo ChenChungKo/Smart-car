@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+
+Code/Server/audio_test/
+Code/Server/camera_test_images/
+Code/Server/endurance_logs/
+Code/Server/image.jpg
+Code/Server/full_car_test_image.jpg
+Code/Server/microphone_test.wav
+Code/Server/speaker_test.wav
