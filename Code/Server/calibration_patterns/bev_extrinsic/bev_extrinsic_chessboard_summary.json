@@ -1,0 +1,55 @@
+{
+  "topdown": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/calibration_patterns/extrinsic_ref/topdown_front_up.png",
+  "frame_size": [
+    640,
+    480
+  ],
+  "bev_size": [
+    1000,
+    1000
+  ],
+  "focal_scale": 1.0,
+  "size_scale": 2.0,
+  "cameras": {
+    "front": {
+      "ok": true,
+      "surround_name": "front",
+      "source_image": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/camera_labeled/front_csi_cam1.jpg",
+      "H_file": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/calibration_patterns/bev_extrinsic/camera_front_H.npy",
+      "reproj_err_px": 1.6981014013290405,
+      "inliers": 35,
+      "order_id": 3,
+      "region_name": "front_up"
+    },
+    "left": {
+      "ok": true,
+      "surround_name": "left",
+      "source_image": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/camera_labeled/left_usb_video0.jpg",
+      "H_file": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/calibration_patterns/bev_extrinsic/camera_left_H.npy",
+      "reproj_err_px": 1.6689491271972656,
+      "inliers": 36,
+      "order_id": 1,
+      "region_name": "front_up"
+    },
+    "right": {
+      "ok": true,
+      "surround_name": "right",
+      "source_image": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/camera_labeled/right_usb_video10.jpg",
+      "H_file": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/calibration_patterns/bev_extrinsic/camera_right_H.npy",
+      "reproj_err_px": 1.1088718175888062,
+      "inliers": 41,
+      "order_id": 1,
+      "region_name": "front_up"
+    },
+    "rear": {
+      "ok": true,
+      "surround_name": "back",
+      "source_image": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/camera_labeled/rear_usb_video37.jpg",
+      "H_file": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/calibration_patterns/bev_extrinsic/camera_back_H.npy",
+      "reproj_err_px": 1.117103099822998,
+      "inliers": 39,
+      "order_id": 3,
+      "region_name": "front_up"
+    }
+  }
+}

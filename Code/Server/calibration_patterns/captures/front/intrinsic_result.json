@@ -1,0 +1,33 @@
+{
+  "camera": "front",
+  "calibration_mode": "normal",
+  "method": "fixed_principal_10images",
+  "image_count": 10,
+  "images_used": [
+    "img_raw1.jpg",
+    "img_raw10.jpg",
+    "img_raw11.jpg",
+    "img_raw2.jpg",
+    "img_raw3.jpg",
+    "img_raw4.jpg",
+    "img_raw5.jpg",
+    "img_raw6.jpg",
+    "img_raw7.jpg",
+    "img_raw9.jpg"
+  ],
+  "reprojection_error": 6.083416666147694,
+  "fx": 425.6058481389969,
+  "fy": 290.8434263350113,
+  "cx": 320.0,
+  "cy": 240.0,
+  "D": [
+    0.25394331121093205,
+    -0.21275180732417964,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "K_file": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/calibration_patterns/captures/front/camera_0_K.npy",
+  "D_file": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/calibration_patterns/captures/front/camera_0_D.npy",
+  "note": "\u524d\u93e1\u982d\u89d2\u5ea6\u8b8a\u5316\u6709\u9650\uff1b\u4f7f\u7528\u56fa\u5b9a\u4e3b\u9ede pinhole \u6a19\u5b9a\u3002BEV \u5916\u53c3\u6a19\u5b9a\u6642\u53ef\u518d\u5fae\u8abf\u3002"
+}

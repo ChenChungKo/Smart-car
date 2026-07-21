@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import json
 import time
 from pathlib import Path
 
@@ -397,18 +398,47 @@ class FullCarTester:
 
     def test_cameras(self):
         self.test_picameras()
-        self.test_usb_cameras()
+        self.test_named_usb_cameras()
+
+    def save_usb_frame_with_exif(self, output_path, frame, position, camera_entry):
+        import cv2
+        from PIL import Image
+
+        captured_at = time.strftime("%Y:%m:%d %H:%M:%S")
+        image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        exif = Image.Exif()
+        exif[270] = (
+            f"{position} USB camera; "
+            f"sensor={camera_entry.get('sensor', 'unknown')}; "
+            f"lens={camera_entry.get('lens_type', 'unknown')}"
+        )
+        exif[271] = "BL"
+        exif[272] = camera_entry.get("model", "USB Camera")
+        exif[305] = "OpenCV / full_car_test.py"
+        exif[306] = captured_at
+        exif[36867] = captured_at
+        image.save(
+            output_path,
+            format="JPEG",
+            quality=95,
+            subsampling=0,
+            dpi=(72, 72),
+            exif=exif,
+        )
 
     def test_picameras(self):
         from picamera2 import Picamera2
 
         output_dir = Path(self.args.camera_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+        capture_width = self.args.csi_camera_width
+        capture_height = self.args.csi_camera_height
         camera_info = Picamera2.global_camera_info()
         camera_count = self.args.picamera_count
         if self.args.camera_count is not None:
             camera_count = self.args.camera_count
         print(f"Detected {len(camera_info)} Picamera device(s): {camera_info}")
+        print(f"CSI capture size: {capture_width}x{capture_height}")
         for camera_index in range(camera_count):
             output_path = output_dir / f"picamera_{camera_index}.jpg"
             print(f"\nTesting Picamera {camera_index}, output={output_path}")
@@ -416,7 +446,7 @@ class FullCarTester:
             try:
                 camera = Picamera2(camera_num=camera_index)
                 config = camera.create_still_configuration(
-                    main={"size": (self.args.camera_width, self.args.camera_height)}
+                    main={"size": (capture_width, capture_height)}
                 )
                 camera.configure(config)
                 camera.start()
@@ -432,6 +462,106 @@ class FullCarTester:
                     except Exception as exc:
                         print(f"  Picamera {camera_index}: close failed: {exc}")
 
+    def test_named_usb_cameras(self):
+        from camera_devices import resolve_usb_capture_index
+
+        output_dir = Path(self.args.camera_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        hardware = self.load_camera_hardware()
+        positions = ("left", "right", "rear")
+
+        for index, position in enumerate(positions, start=1):
+            # Resolve immediately before opening. A USB camera can reconnect and
+            # receive a new /dev/video index while Picamera/libcamera is running.
+            entry = hardware[position]
+            try:
+                device_index, resolved = resolve_usb_capture_index(entry)
+                capture_width = self.args.camera_width
+                capture_height = self.args.camera_height
+                output_path = output_dir / f"usb_{position}_video{device_index}.jpg"
+                print(
+                    f"\nTesting {position} USB camera "
+                    f"/dev/video{device_index} ({resolved}), "
+                    f"capture_size={capture_width}x{capture_height}, output={output_path}"
+                )
+                ok, frame = self.capture_usb_frame(
+                    device_index,
+                    width=capture_width,
+                    height=capture_height,
+                    fourcc="YUYV",
+                    fps=6,
+                )
+                if not ok:
+                    print(f"  {position}: capture failed")
+                else:
+                    self.save_usb_frame_with_exif(
+                        output_path,
+                        frame,
+                        position,
+                        entry,
+                    )
+                    print(f"  {position}: capture OK, actual_size={frame.shape[1]}x{frame.shape[0]}")
+            except Exception as exc:
+                print(f"  {position}: capture failed: {exc}")
+            if index < len(positions):
+                time.sleep(self.args.camera_settle)
+
+    def capture_csi_still(self, device_index, output_path):
+        import numpy as np
+        from picamera2 import Picamera2
+
+        camera = None
+        try:
+            camera = Picamera2(camera_num=device_index)
+            config = camera.create_still_configuration(
+                main={"size": (self.args.camera_width, self.args.camera_height)}
+            )
+            camera.configure(config)
+            camera.start()
+            camera.set_controls({"AeEnable": True, "AwbEnable": True})
+            time.sleep(self.args.camera_warmup)
+            last_frame = None
+            for _ in range(self.args.camera_warmup_frames):
+                last_frame = camera.capture_array()
+                time.sleep(0.1)
+            if last_frame is not None and float(np.mean(last_frame)) < 80:
+                camera.set_controls({"ExposureTime": 40000, "AnalogueGain": 4.0})
+                for _ in range(5):
+                    last_frame = camera.capture_array()
+                    time.sleep(0.1)
+            camera.capture_file(str(output_path))
+            return True
+        finally:
+            if camera is not None:
+                camera.close()
+
+    def capture_usb_frame(self, device_index, width=None, height=None, fourcc=None, fps=None):
+        import cv2
+
+        width = self.args.camera_width if width is None else width
+        height = self.args.camera_height if height is None else height
+        capture = cv2.VideoCapture(device_index, cv2.CAP_V4L2)
+        try:
+            if not capture.isOpened():
+                return False, None
+            if fourcc:
+                capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc))
+            capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+            capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+            if fps is not None:
+                capture.set(cv2.CAP_PROP_FPS, fps)
+            capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
+            time.sleep(self.args.camera_warmup)
+            for _ in range(self.args.camera_warmup_frames):
+                capture.read()
+                time.sleep(0.1)
+            ok, frame = capture.read()
+            if not ok or frame is None:
+                return False, None
+            return True, frame
+        finally:
+            capture.release()
+
     def test_usb_cameras(self):
         import cv2
 
@@ -444,17 +574,10 @@ class FullCarTester:
         for camera_number, device_index in enumerate(device_indexes):
             output_path = output_dir / f"usb_camera_{camera_number}.jpg"
             print(f"\nTesting USB camera /dev/video{device_index}, output={output_path}")
-            capture = cv2.VideoCapture(device_index)
             try:
-                if not capture.isOpened():
-                    print(f"  USB camera {device_index}: open failed")
-                    continue
-                capture.set(cv2.CAP_PROP_FRAME_WIDTH, self.args.camera_width)
-                capture.set(cv2.CAP_PROP_FRAME_HEIGHT, self.args.camera_height)
-                time.sleep(self.args.camera_warmup)
-                ok, frame = capture.read()
-                if not ok or frame is None:
-                    print(f"  USB camera {device_index}: frame read failed")
+                ok, frame = self.capture_usb_frame(device_index)
+                if not ok:
+                    print(f"  USB camera {device_index}: capture failed")
                     continue
                 if cv2.imwrite(str(output_path), frame):
                     print(f"  USB camera {device_index}: capture OK")
@@ -462,8 +585,94 @@ class FullCarTester:
                     print(f"  USB camera {device_index}: write failed")
             except Exception as exc:
                 print(f"  USB camera {device_index}: capture failed: {exc}")
-            finally:
-                capture.release()
+
+    def load_camera_hardware(self):
+        hardware_path = Path(__file__).with_name("camera_hardware.json")
+        with open(hardware_path, encoding="utf-8") as handle:
+            return json.load(handle)
+
+    def resolve_labeled_camera_list(self):
+        hardware = self.load_camera_hardware()
+        order = ["front", "left", "right", "rear"]
+        if self.args.labeled_camera:
+            order = [self.args.labeled_camera]
+
+        cameras = []
+        for position in order:
+            entry = hardware[position]
+            if entry["interface"] == "csi":
+                cameras.append((position, "csi", self.args.csi_camera_num, entry["device"]))
+            else:
+                cameras.append((position, "usb", None, entry))
+        return cameras
+
+    def test_cameras_labeled(self):
+        import cv2
+
+        from camera_devices import resolve_usb_capture_index
+
+        output_dir = Path(self.args.labeled_camera_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        labeled_cameras = self.resolve_labeled_camera_list()
+        total = len(labeled_cameras)
+        print(f"Saving labeled camera images to {output_dir}")
+        print("One camera at a time: open -> warmup -> save -> close (never open all together)")
+        for index, (position, camera_type, device_index, resolved) in enumerate(labeled_cameras, start=1):
+            print(f"\n[{index}/{total}] {position} camera")
+            if not self.args.yes:
+                answer = input(f"Ready to open ONLY {position}? ENTER=capture, q=skip: ").strip().lower()
+                if answer in ("q", "quit", "skip"):
+                    print(f"  {position}: skipped")
+                    continue
+            if camera_type == "csi":
+                output_path = output_dir / f"{position}_csi_cam{device_index}.jpg"
+                print(f"  CSI camera_num={device_index} ({resolved}) -> {output_path.name}")
+                try:
+                    if self.capture_csi_still(device_index, output_path):
+                        print(f"  {position}: capture OK")
+                    else:
+                        print(f"  {position}: capture failed")
+                except Exception as exc:
+                    print(f"  {position}: capture failed: {exc}")
+            else:
+                # Resolve immediately before capture because /dev/video indexes
+                # can change after opening/closing a CSI camera.
+                try:
+                    device_index, resolved = resolve_usb_capture_index(resolved)
+                except Exception as exc:
+                    print(f"  {position}: device resolution failed: {exc}")
+                    continue
+                output_path = output_dir / f"{position}_usb_video{device_index}.jpg"
+                print(f"  /dev/video{device_index} ({resolved}) -> {output_path.name}")
+                try:
+                    ok, frame = self.capture_usb_frame(device_index)
+                    if not ok:
+                        print(f"  {position}: capture failed")
+                    elif cv2.imwrite(str(output_path), frame):
+                        print(f"  {position}: capture OK")
+                    else:
+                        print(f"  {position}: write failed")
+                except Exception as exc:
+                    print(f"  {position}: capture failed: {exc}")
+            if index < total:
+                time.sleep(self.args.camera_settle)
+        print(f"\nLabeled camera capture complete. Files in {output_dir}")
+
+    def test_plane_map(self):
+        self.test_cameras_labeled()
+        from plane_map_stitch import stitch_plane_map
+
+        calibration = Path(__file__).with_name("plane_map_calibration.json")
+        output_dir = Path(__file__).with_name("plane_map_output")
+        input_dir = Path(self.args.labeled_camera_dir)
+        stitched_path, gridded_path, preview_path = stitch_plane_map(
+            input_dir,
+            output_dir,
+            calibration,
+        )
+        print(f"\nPlane map stitched: {stitched_path}")
+        print(f"Plane map with grid: {gridded_path}")
+        print(f"Plane map preview: {preview_path}")
 
     def test_sensors(self):
         self.test_ultrasonic()
@@ -487,7 +696,7 @@ class FullCarTester:
             ("servo", self.test_servo),
             ("buzzer", self.test_buzzer),
             ("audio", self.test_audio),
-            ("5 cameras", self.test_cameras),
+            ("5 cameras (2 CSI + 3 USB, sequential)", self.test_cameras),
             ("basic-drive", self.test_basic_drive),
             ("mecanum", self.test_mecanum_drive),
         ]
@@ -584,6 +793,8 @@ class FullCarTester:
             "led": self.test_led,
             "camera": self.test_camera,
             "cameras": self.test_cameras,
+            "cameras-labeled": self.test_cameras_labeled,
+            "plane-map": self.test_plane_map,
             "all": self.test_all,
         }
         tests[name]()
@@ -606,6 +817,8 @@ class FullCarTester:
             ("led", "LED pixels"),
             ("camera", "Camera capture"),
             ("cameras", "All camera captures"),
+            ("cameras-labeled", "Labeled 4-camera capture (front/left/right/rear)"),
+            ("plane-map", "Capture 4 cameras and stitch plane map"),
             ("all", "Run every test"),
         ]
         while True:
@@ -648,6 +861,8 @@ def build_parser():
             "led",
             "camera",
             "cameras",
+            "cameras-labeled",
+            "plane-map",
             "all",
         ],
         help="Run one test directly instead of opening the menu.",
@@ -673,11 +888,22 @@ def build_parser():
     parser.add_argument("--picamera-count", type=int, default=2, help="Number of Picamera indexes to test.")
     parser.add_argument("--usb-camera-count", type=int, default=3, help="Number of USB camera indexes to test.")
     parser.add_argument("--usb-camera-start", type=int, default=0, help="First /dev/video index for USB camera tests.")
-    parser.add_argument("--usb-camera-indexes", default="0,2,37", help="Comma-separated /dev/video indexes for USB camera tests, for example 0,2,37.")
+    parser.add_argument("--usb-camera-indexes", default="0,10,37", help="Comma-separated /dev/video indexes for USB camera tests, for example 0,10,37.")
+    parser.add_argument("--csi-camera-num", type=int, default=1, help="CSI Picamera index for front camera (labeled capture).")
+    parser.add_argument(
+        "--labeled-camera",
+        choices=["front", "left", "right", "rear"],
+        help="Capture only one labeled camera (open that camera alone).",
+    )
+    parser.add_argument("--labeled-camera-dir", default="camera_labeled", help="Directory for labeled front/left/right/rear captures.")
     parser.add_argument("--camera-dir", default="camera_test_images", help="Directory for multi-camera captures.")
-    parser.add_argument("--camera-width", type=int, default=640, help="Capture width for multi-camera tests.")
-    parser.add_argument("--camera-height", type=int, default=480, help="Capture height for multi-camera tests.")
-    parser.add_argument("--camera-warmup", type=float, default=1.0, help="Seconds to wait after starting each camera.")
+    parser.add_argument("--camera-width", type=int, default=1920, help="USB capture width for multi-camera tests.")
+    parser.add_argument("--camera-height", type=int, default=1080, help="USB capture height for multi-camera tests.")
+    parser.add_argument("--csi-camera-width", type=int, default=1920, help="CSI capture width for multi-camera tests.")
+    parser.add_argument("--csi-camera-height", type=int, default=1440, help="CSI capture height for multi-camera tests.")
+    parser.add_argument("--camera-warmup", type=float, default=2.0, help="Seconds to wait after opening each camera before discarding warmup frames.")
+    parser.add_argument("--camera-warmup-frames", type=int, default=15, help="Number of preview frames to discard so auto-exposure can settle.")
+    parser.add_argument("--camera-settle", type=float, default=1.0, help="Seconds to wait between closing one camera and opening the next.")
     parser.add_argument("--obstacle-pins", default="26,20,19,16,6,12", help="Comma-separated BCM GPIO pins for extra infrared obstacle sensors.")
     parser.set_defaults(obstacle_active_high=False)
     parser.add_argument("--obstacle-active-high", action="store_true", help="Treat HIGH as obstacle detected.")

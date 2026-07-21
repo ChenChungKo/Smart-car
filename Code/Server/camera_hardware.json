@@ -1,0 +1,85 @@
+{
+  "front": {
+    "position": "front",
+    "model": "J8IW228-V30",
+    "interface": "csi",
+    "device": "Picamera2 camera_num=1",
+    "sensor": "Sony IMX219",
+    "lens_type": "normal",
+    "calibration_mode": "pinhole",
+    "native_resolution": [3280, 2464],
+    "recommended_capture": [640, 480],
+    "notes": "Pi libcamera 已辨識為 imx219。非魚眼，標定用一般 pinhole 模型，不要用 fisheye。"
+  },
+  "left": {
+    "position": "left",
+    "model": "BL 1080p S10",
+    "interface": "usb",
+    "device": "/dev/video1",
+    "usb_bus": "usb-xhci-hcd.1-1",
+    "sensor": "OV2710 (ELP 同級)",
+    "lens_type": "fisheye",
+    "calibration_mode": "fisheye",
+    "native_resolution": [1920, 1080],
+    "recommended_capture": [640, 480],
+    "fov_deg": 180,
+    "share_intrinsics_with": "left",
+    "intrinsics_master": true,
+    "notes": "UVC 免驅動。三顆 USB 規格相同，內參 K/D 以本機為 master 共用。"
+  },
+  "right": {
+    "position": "right",
+    "model": "BL 1080p S10",
+    "interface": "usb",
+    "device": "/dev/video10",
+    "usb_bus": "usb-xhci-hcd.0-2",
+    "sensor": "OV2710 (ELP 同級)",
+    "lens_type": "fisheye",
+    "calibration_mode": "fisheye",
+    "native_resolution": [1920, 1080],
+    "recommended_capture": [640, 480],
+    "fov_deg": 180,
+    "share_intrinsics_with": "left"
+  },
+  "rear": {
+    "position": "rear",
+    "model": "BL 1080p S10",
+    "interface": "usb",
+    "device": "/dev/video37",
+    "usb_bus": "usb-xhci-hcd.0-1.2",
+    "sensor": "OV2710 (ELP 同級)",
+    "lens_type": "fisheye",
+    "calibration_mode": "fisheye",
+    "native_resolution": [1920, 1080],
+    "recommended_capture": [640, 480],
+    "fov_deg": 180,
+    "share_intrinsics_with": "left"
+  },
+  "calibration_groups": {
+    "csi_front": ["front"],
+    "usb_fisheye": ["left", "right", "rear"]
+  },
+  "shared_intrinsics": {
+    "usb_fisheye": {
+      "source_camera": "left",
+      "K_file": "calibration_patterns/shared/usb_fisheye_K.npy",
+      "D_file": "calibration_patterns/shared/usb_fisheye_D.npy",
+      "summary_file": "calibration_patterns/usb_fisheye_intrinsics.json",
+      "apply_script": "calibration_patterns/apply_shared_usb_intrinsics.py"
+    }
+  },
+  "camera_calibration_repo_hints": {
+    "usb_intrinsic": {
+      "tool": "IntrinsicCalibration/InCalibrator('fisheye')",
+      "frame_width": 640,
+      "frame_height": 480,
+      "apply_to": ["left", "right", "rear"]
+    },
+    "csi_intrinsic": {
+      "tool": "IntrinsicCalibration/InCalibrator('normal')",
+      "frame_width": 640,
+      "frame_height": 480,
+      "apply_to": ["front"]
+    }
+  }
+}

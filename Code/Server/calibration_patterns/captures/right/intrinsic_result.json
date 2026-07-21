@@ -1,0 +1,8 @@
+{
+  "camera": "right",
+  "calibration_mode": "fisheye",
+  "intrinsics_source": "shared_left",
+  "shared_from": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/calibration_patterns/shared/usb_fisheye_K.npy",
+  "K_file": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/calibration_patterns/captures/right/camera_0_K.npy",
+  "D_file": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/calibration_patterns/captures/right/camera_0_D.npy"
+}

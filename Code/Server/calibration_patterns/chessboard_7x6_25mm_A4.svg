@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="210.0mm" height="297.0mm" viewBox="0 0 210.0 297.0">
+  <rect x="0" y="0" width="210.0" height="297.0" fill="white"/>
+  <rect x="5.000" y="61.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <rect x="55.000" y="61.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <rect x="105.000" y="61.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <rect x="155.000" y="61.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <rect x="30.000" y="86.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <rect x="80.000" y="86.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <rect x="130.000" y="86.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <rect x="180.000" y="86.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <rect x="5.000" y="111.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <rect x="55.000" y="111.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <rect x="105.000" y="111.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <rect x="155.000" y="111.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <rect x="30.000" y="136.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <rect x="80.000" y="136.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <rect x="130.000" y="136.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <rect x="180.000" y="136.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <rect x="5.000" y="161.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <rect x="55.000" y="161.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <rect x="105.000" y="161.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <rect x="155.000" y="161.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <rect x="30.000" y="186.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <rect x="80.000" y="186.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <rect x="130.000" y="186.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <rect x="180.000" y="186.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <rect x="5.000" y="211.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <rect x="55.000" y="211.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <rect x="105.000" y="211.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <rect x="155.000" y="211.000" width="25.000" height="25.000" fill="black" stroke="none"/>
+  <text x="5" y="292.0" font-size="3" fill="#444">OpenCV chessboard: inner corners 7x6, square=25.0mm, page=210.0x297.0mm</text>
+</svg>

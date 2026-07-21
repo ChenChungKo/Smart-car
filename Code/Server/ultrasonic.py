@@ -33,8 +33,18 @@ class Ultrasonic:
             return None
 
     def close(self):
-        # Close the distance sensor.
-        self.sensor.close()  # Close the sensor to release resources
+        # gpiozero 2.x DistanceSensor.close() closes the trigger pin before its
+        # sampling queue. The queue can then call _read() once more and access
+        # a trigger that has already been cleared. Stop and join it first.
+        sensor = self.sensor
+        if sensor is None:
+            return
+        queue = getattr(sensor, "_queue", None)
+        if queue is not None:
+            queue.stop()
+            sensor._queue = None
+        sensor.close()
+        self.sensor = None
 
 if __name__ == '__main__':
     # Initialize the Ultrasonic instance with default pin numbers and max distance
