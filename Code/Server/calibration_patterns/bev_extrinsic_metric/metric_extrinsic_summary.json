@@ -1,0 +1,31 @@
+{
+  "method": "metric_layout_aug3",
+  "px_per_cm": 11.3636,
+  "car_mask_px": {
+    "width": 205,
+    "height": 330,
+    "center": [
+      500.0,
+      500.0
+    ]
+  },
+  "labeled_dir": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/camera_labeled_testset_aug3",
+  "cameras": {
+    "front": {
+      "ok": true,
+      "H_file": "calibration_patterns/bev_extrinsic_metric/camera_front_H.npy"
+    },
+    "left": {
+      "ok": true,
+      "H_file": "calibration_patterns/bev_extrinsic_metric/camera_left_H.npy"
+    },
+    "right": {
+      "ok": true,
+      "H_file": "calibration_patterns/bev_extrinsic_metric/camera_right_H.npy"
+    },
+    "rear": {
+      "ok": true,
+      "H_file": "calibration_patterns/bev_extrinsic_metric/camera_back_H.npy"
+    }
+  }
+}

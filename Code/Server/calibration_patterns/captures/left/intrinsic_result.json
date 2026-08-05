@@ -1,0 +1,33 @@
+{
+  "camera": "left",
+  "calibration_mode": "fisheye",
+  "image_count_total": 20,
+  "image_count_used": 20,
+  "rms_reprojection_error_px": 0.2422425700907058,
+  "K": [
+    [
+      361.0078275645968,
+      0.0,
+      323.07282559869753
+    ],
+    [
+      0.0,
+      480.7894948921182,
+      230.65751824006585
+    ],
+    [
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "D": [
+    -0.10715313397518729,
+    -0.002146469618405897,
+    0.0,
+    0.0
+  ],
+  "K_file": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/calibration_patterns/captures/left/camera_0_K.npy",
+  "D_file": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/calibration_patterns/captures/left/camera_0_D.npy",
+  "fixed_k3_k4": true
+}

@@ -1,0 +1,19 @@
+OpenCV chessboard calibration pattern
+=================================
+Inner corners: 7 x 6
+Square size: 25.0 mm
+Pattern size: 200.0 x 175.0 mm
+Page: A4 (210.0 x 297.0 mm)
+
+CameraCalibration parameters:
+  -bw 7 -bh 6 -size 25
+
+Print instructions:
+1. Prefer chessboard_7x6_25mm_A4.svg in a browser or vector tool.
+2. Print at 100% scale. Do NOT use 'fit to page'.
+3. After printing, measure one square with a ruler.
+4. Paste the board onto flat cardboard/acrylic.
+
+PNG file: chessboard_7x6_25mm_300dpi.png
+  Image DPI metadata target: 300
+  Expected square size when printed correctly: 25.0 mm

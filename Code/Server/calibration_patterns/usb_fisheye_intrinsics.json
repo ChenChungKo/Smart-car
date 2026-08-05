@@ -1,0 +1,22 @@
+{
+  "source_camera": "left",
+  "calibration_mode": "fisheye",
+  "shared_with": [
+    "left",
+    "right",
+    "rear"
+  ],
+  "K_file": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/calibration_patterns/shared/usb_fisheye_K.npy",
+  "D_file": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/calibration_patterns/shared/usb_fisheye_D.npy",
+  "fx": 353.8973447175507,
+  "fy": 466.73271187826765,
+  "cx": 326.92386041804826,
+  "cy": 244.4177227016006,
+  "D": [
+    -0.0843011746385335,
+    -0.09711264490963306,
+    0.1510169890406613,
+    -0.07960139968821374
+  ],
+  "notes": "\u4e09\u9846 BL 1080p S10 USB \u9b5a\u773c\u5171\u7528\u540c\u4e00\u7d44\u5167\u53c3\u3002"
+}

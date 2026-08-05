@@ -1,0 +1,189 @@
+{
+  "source": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/plane_map_calibration.json",
+  "method": "quad_corners_auto_detect",
+  "frame_size": [
+    640,
+    480
+  ],
+  "bev_size": [
+    1000,
+    1000
+  ],
+  "cameras": {
+    "front": {
+      "surround_name": "front",
+      "H_file": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/calibration_patterns/bev_extrinsic_quad/camera_front_H.npy",
+      "size_scale": 1.0,
+      "src_quad_px": [
+        [
+          281.0,
+          151.0
+        ],
+        [
+          446.0,
+          151.0
+        ],
+        [
+          639.0,
+          479.0
+        ],
+        [
+          441.0,
+          479.0
+        ]
+      ],
+      "dst_bev_px": [
+        [
+          229.8850555419922,
+          0.0
+        ],
+        [
+          770.1149291992188,
+          0.0
+        ],
+        [
+          770.1149291992188,
+          500.0
+        ],
+        [
+          229.8850555419922,
+          500.0
+        ]
+      ],
+      "warnings": [
+        "(639.0, 479.0) loose fit min_dist=19637",
+        "(441.0, 479.0) loose fit min_dist=1828"
+      ]
+    },
+    "left": {
+      "surround_name": "left",
+      "H_file": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/calibration_patterns/bev_extrinsic_quad/camera_left_H.npy",
+      "size_scale": 2.0,
+      "src_quad_px": [
+        [
+          159.0,
+          68.0
+        ],
+        [
+          639.0,
+          68.0
+        ],
+        [
+          639.0,
+          479.0
+        ],
+        [
+          9.0,
+          479.0
+        ]
+      ],
+      "dst_bev_px": [
+        [
+          0.0,
+          175.4385986328125
+        ],
+        [
+          500.0,
+          175.4385986328125
+        ],
+        [
+          500.0,
+          824.5614013671875
+        ],
+        [
+          0.0,
+          824.5614013671875
+        ]
+      ],
+      "warnings": [
+        "(9.0, 479.0) loose fit min_dist=1009"
+      ]
+    },
+    "right": {
+      "surround_name": "right",
+      "H_file": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/calibration_patterns/bev_extrinsic_quad/camera_right_H.npy",
+      "size_scale": 2.0,
+      "src_quad_px": [
+        [
+          57.0,
+          288.0
+        ],
+        [
+          639.0,
+          288.0
+        ],
+        [
+          255.0,
+          479.0
+        ],
+        [
+          0.0,
+          479.0
+        ]
+      ],
+      "dst_bev_px": [
+        [
+          500.0,
+          175.4385986328125
+        ],
+        [
+          1000.0,
+          175.4385986328125
+        ],
+        [
+          1000.0,
+          824.5614013671875
+        ],
+        [
+          500.0,
+          824.5614013671875
+        ]
+      ],
+      "warnings": [
+        "(0.0, 479.0) loose fit min_dist=1585"
+      ]
+    },
+    "rear": {
+      "surround_name": "back",
+      "H_file": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/calibration_patterns/bev_extrinsic_quad/camera_back_H.npy",
+      "size_scale": 2.0,
+      "src_quad_px": [
+        [
+          0.0,
+          112.0
+        ],
+        [
+          639.0,
+          112.0
+        ],
+        [
+          639.0,
+          479.0
+        ],
+        [
+          15.0,
+          479.0
+        ]
+      ],
+      "dst_bev_px": [
+        [
+          229.8850555419922,
+          500.0
+        ],
+        [
+          770.1149291992188,
+          500.0
+        ],
+        [
+          770.1149291992188,
+          1000.0
+        ],
+        [
+          229.8850555419922,
+          1000.0
+        ]
+      ],
+      "warnings": []
+    }
+  }
+}

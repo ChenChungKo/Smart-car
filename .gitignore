@@ -1,0 +1,24 @@
+__pycache__/
+*.py[cod]
+
+Code/Server/audio_test/
+Code/Server/camera_test_images/
+Code/Server/endurance_logs/
+Code/Server/image.jpg
+Code/Server/full_car_test_image.jpg
+Code/Server/microphone_test.wav
+Code/Server/speaker_test.wav
+
+# Large / ephemeral BEV and calibration artifacts
+Code/Server/bev_output/
+Code/Server/plane_map_output/
+Code/Server/camera_labeled_*/
+Code/Server/click_calib_upstream/
+Code/Server/experimental_archive/
+Code/Server/calibration_patterns/**/debug/
+Code/Server/calibration_patterns/**/backup*/
+Code/Server/calibration_patterns/captures/**/img_raw*.jpg
+Code/Server/calibration_patterns/bev_extrinsic_bak_*/
+Code/Server/calibration_patterns/surround_data_quad/
+surround.jpg
+Code/Server/front.jpg

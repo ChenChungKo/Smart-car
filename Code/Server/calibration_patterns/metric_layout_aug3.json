@@ -1,0 +1,42 @@
+{
+  "mat_cm": [87, 57],
+  "coord": "long_short",
+  "photo_front": "toward_decreasing_long",
+  "square_cm": 2.3,
+  "board_outer_squares": [8, 7],
+  "board_inner_corners": [7, 6],
+  "car": {
+    "front_left": [30, 20],
+    "front_right": [30, 38],
+    "rear_left": [59, 20],
+    "rear_right": [59, 38],
+    "length_cm": 29,
+    "width_cm": 18
+  },
+  "boards": {
+    "front": {
+      "gap_cm": 8,
+      "named_corner": "car_facing_right",
+      "corner_long_short": [22, 38],
+      "note": "car-facing edge at long=22; right end at short=38; depth toward smaller long"
+    },
+    "rear": {
+      "gap_cm": 7,
+      "named_corner": "car_facing_right",
+      "corner_long_short": [66, 38],
+      "note": "car-facing edge at long=66; right end at short=38; depth toward larger long"
+    },
+    "left": {
+      "gap_cm": 7,
+      "named_corner": "car_facing_front",
+      "corner_long_short": [34, 13],
+      "note": "car-facing edge at short=13; front end at long=34; depth toward smaller short; extends +18.4 along long"
+    },
+    "right": {
+      "gap_cm": 7,
+      "named_corner": "car_facing_front",
+      "corner_long_short": [34, 45],
+      "note": "car-facing edge at short=45; front end at long=34; depth toward larger short; extends +18.4 along long"
+    }
+  }
+}

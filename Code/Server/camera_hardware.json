@@ -1,0 +1,60 @@
+{
+  "front": {
+    "position": "front",
+    "model": "J8IW228-V30",
+    "interface": "csi",
+    "device": "Picamera2 camera_num=1",
+    "sensor": "Sony IMX219",
+    "lens_type": "fisheye",
+    "calibration_mode": "fisheye",
+    "native_resolution": [3280, 2464],
+    "recommended_capture": [640, 480],
+    "notes": "2026-08-05 重新驗證：實測用 pinhole 模型需要極端負值 k1 才能擬合，且 alpha=1 會把有效區域擠壓成一條窄縫/出現黑洞折疊；改用 fisheye 模型重投影誤差更低(0.028 vs 0.033)且保留的FOV更廣、無黑洞。判定此鏡頭實際為廣角/魚眼等級畸變，改用 fisheye 模型標定。"
+  },
+  "left": {
+    "position": "left",
+    "model": "BL 1080p S10",
+    "interface": "usb",
+    "device": "/dev/video1",
+    "usb_bus": "usb-xhci-hcd.1-1",
+    "sensor": "OV2710 (ELP 同級)",
+    "lens_type": "fisheye",
+    "calibration_mode": "fisheye",
+    "native_resolution": [1920, 1080],
+    "recommended_capture": [640, 480],
+    "fov_deg": 180,
+    "notes": "UVC 免驅動。2026-08-05 起改為各自獨立校正，不再與 right/rear 共用內參（三顆同型號但實體製造仍有差異）。"
+  },
+  "right": {
+    "position": "right",
+    "model": "BL 1080p S10",
+    "interface": "usb",
+    "device": "/dev/video10",
+    "usb_bus": "usb-xhci-hcd.0-2",
+    "sensor": "OV2710 (ELP 同級)",
+    "lens_type": "fisheye",
+    "calibration_mode": "fisheye",
+    "native_resolution": [1920, 1080],
+    "recommended_capture": [640, 480],
+    "fov_deg": 180
+  },
+  "rear": {
+    "position": "rear",
+    "model": "BL 1080p S10",
+    "interface": "usb",
+    "device": "/dev/video37",
+    "usb_bus": "usb-xhci-hcd.0-1.2",
+    "sensor": "OV2710 (ELP 同級)",
+    "lens_type": "fisheye",
+    "calibration_mode": "fisheye",
+    "native_resolution": [1920, 1080],
+    "recommended_capture": [640, 480],
+    "fov_deg": 180
+  },
+  "camera_calibration_repo_hints": {
+    "intrinsic_tool": "IntrinsicCalibration/intrinsicCalib.py",
+    "frame_width": 640,
+    "frame_height": 480,
+    "notes": "全部四顆相機（front/left/right/rear）現在都用各自獨立拍攝的 calibration_patterns/captures/<camera>/img_raw*.jpg，並以 -type fisheye 校正，K/D 存於同目錄 camera_0_K.npy / camera_0_D.npy。"
+  }
+}
