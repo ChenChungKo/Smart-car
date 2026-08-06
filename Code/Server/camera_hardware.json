@@ -23,7 +23,7 @@
     "native_resolution": [1920, 1080],
     "recommended_capture": [640, 480],
     "fov_deg": 180,
-    "notes": "UVC 免驅動。2026-08-05 起改為各自獨立校正，不再與 right/rear 共用內參（三顆同型號但實體製造仍有差異）。"
+    "notes": "UVC 免驅動。2026-08-05 起改為各自獨立校正，不再與 right/rear 共用內參。2026-08-06：左側擷取易 MJPG 撕裂／曝光未穩，實拍請優先 YUYV、長暖機、多幀挑低撕裂（見 BEV_LIVE_CAPTURE.md / capture_live_surround.py）。"
   },
   "right": {
     "position": "right",
@@ -36,7 +36,8 @@
     "calibration_mode": "fisheye",
     "native_resolution": [1920, 1080],
     "recommended_capture": [640, 480],
-    "fov_deg": 180
+    "fov_deg": 180,
+    "notes": "外參方向：metric H 必須 flip_h+flip_v（board centroid）。缺 flip_v 會把右後標物映到右前。正式版 board_pivot、地縫 dy≈16。見 BEV_LIVE_CAPTURE.md §4。"
   },
   "rear": {
     "position": "rear",

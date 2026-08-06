@@ -26,15 +26,20 @@ CAMERA_ORDER = ("front", "left", "right", "rear")
 SURROUND_NAMES = {"front": "front", "left": "left", "right": "right", "rear": "back"}
 
 # Checkerboard corner order is ambiguous under 180° rotation; reprojection error
-# alone can accept an upside-down mapping. Rotate H about the board centroid
-# after the numeric fit when visual inspection shows inverted surround content.
-# Post-fit orientation fixes about each board centroid. Chessboard point sets are
-# symmetric, so numeric reprojection can accept a flipped mapping.
+# alone can accept an upside-down mapping. Apply fixes about each *board*
+# centroid in BEV after the numeric fit (not the car center).
 # Each value is a list of (kind, angle_deg) applied left-to-right.
 # rotate angle: visually CCW degrees (+Y down); clockwise 90 => -90.
+#
+# RIGHT CAMERA — DO NOT DROP flip_v WITHOUT RE-CHECKING:
+#   2026-08-06: with only flip_h, green tape at physical right-*rear* wheel
+#   appeared at right-*front* in surround (front/rear inverted). Adding flip_v
+#   about the right board BEV centroid fixes it; left/right floor seam dy ≈ 16px.
+#   Do not re-pivot that flip about the car center unless re-verified visually.
+# See also Code/Server/BEV_LIVE_CAPTURE.md §4.
 MANUAL_ORIENTATION_FIX = {
     "front": [("rotate", 180.0)],
-    "right": [("flip_h", 0.0)],
+    "right": [("flip_h", 0.0), ("flip_v", 0.0)],
     "rear": [("flip_h", 0.0), ("rotate", -90.0)],  # mirror then clockwise 90
 }
 
