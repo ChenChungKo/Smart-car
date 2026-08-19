@@ -3,6 +3,8 @@
 更新日期：2026-08-06  
 外參目錄：`calibration_patterns/bev_extrinsic_metric_auto/`（公制棋盤，**無俯看圖**）
 
+拼接能對齊的關鍵是 `metric_layout_aug3.json` 裡**四面棋盤的地面座標**＋車身四角（cm），不是俯看參考圖。
+
 ---
 
 ## 1. 相機對應（勿憑 video 編號硬記）

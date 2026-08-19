@@ -149,6 +149,18 @@ Code/Server/camera_test_images/
 流程：魚眼去畸變 → 每路地面單應 `H` → 扇形遮罩＋羽化拼接。  
 **不需要俯看圖。** 換場景可沿用同一組 `K/D/H`，前提是鏡頭相對車身沒被碰歪。
 
+**拼接成功的關鍵：** 不是對齊俯拍照，而是把**四面棋盤在地面上的真實座標**（以及車身四角）量好寫進 layout。  
+每路影像偵測棋盤角點後，與這些公制座標對應，才能估出把畫面拉到同一俯視平面的 `H`。四面座標缺一、或量錯，那路就會歪、對不齊。
+
+座標檔：
+
+```text
+Code/Server/calibration_patterns/metric_layout_aug3.json
+```
+
+裡面包含：墊子尺寸、每路棋盤一個已知角的 (long, short) cm、車身四角 cm。  
+腳本 `metric_extrinsic_from_boards.py` 依此算出 `bev_extrinsic_metric_auto/` 的四個 `H`。
+
 四路對應（USB 編號會變，一律用 `usb_bus`）：
 
 ```text
