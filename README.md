@@ -168,25 +168,64 @@ Code/Server/calibration_patterns/bev_extrinsic_metric_auto/
 缺 `flip_v` 會把右後地面映到右前（例如綠膠帶會跑到右前輪）。  
 2026-08-06 確認版地縫差約 dy≈16 px，不要改用車身中心當 pivot 覆蓋。
 
-現場拍攝與拼接：
+### 如何拍攝並拼出環景
+
+1. 確認相機沒被其他程式佔用，重開機後先對一下 USB 節點：
 
 ```bash
-cd Code/Server
+v4l2-ctl --list-devices
+```
+
+每個 USB Camera 條目下**第一個** `/dev/videoX` 才是擷取節點。程式會依 `camera_hardware.json` 的 `usb_bus` 自動對應，不要寫死編號。
+
+2. 進入 Server 目錄，四路各拍一張並立刻拼接：
+
+```bash
+cd /home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server
 python3 capture_live_surround.py --stitch
 ```
 
-注意：
+腳本會：**先拍 USB left → right → rear，再拍 CSI front**（先開 CSI 容易跟 USB 搶裝置）。  
+USB 優先用 YUYV；左側會連拍多幀，挑撕裂較小的一張。
 
-- 拍攝順序：先 USB（left/right/rear），再 CSI front。
-- USB 優先 **YUYV**。MJPG 容易撕裂或 `select() timeout` 卡住。
-- 左側相機特別不穩，腳會多抓幾幀挑撕裂較小的一張。
-- 重開機後先跑 `v4l2-ctl --list-devices`，不要寫死 `/dev/videoX`。
-
-詳細操作、已知坑與驗證口訣：
+3. 看結果：
 
 ```text
-Code/Server/BEV_LIVE_CAPTURE.md
+四路原圖：Code/Server/camera_labeled_live_now/{front,left,right,rear}.jpg
+四路併圖：Code/Server/bev_output/live_now_stitch/raw_2x2.jpg
+環景結果：Code/Server/bev_output/live_now_stitch/surround_square.jpg
 ```
+
+只拍照、先不拼接：
+
+```bash
+python3 capture_live_surround.py
+```
+
+已有四張圖（檔名需含 `front` / `left` / `right` / `rear`）時，手動部署再拼接：
+
+```bash
+python3 bev_deploy.py \
+  --extrinsic-dir calibration_patterns/bev_extrinsic_metric_auto \
+  --labeled-dir camera_labeled_live_now
+
+python3 bev_stitch.py --blend --feather 40 \
+  --car-width 207 --car-height 333 \
+  --car-center-x 506 --car-center-y 511 \
+  --output-dir bev_output/live_now_stitch
+```
+
+車身遮罩數字來自  
+`calibration_patterns/bev_extrinsic_metric_auto/metric_extrinsic_auto_summary.json` 的 `car_mask_px`。
+
+常見狀況：
+
+- 左側畫面像被橫切、地磚縫錯位：MJPG 撕裂。腳本已優先 YUYV。
+- `select() timeout` 卡住很久：USB 被佔用或 MJPG 掛住。關掉其他預覽後重跑。
+- 環景右後標物跑到右前：右側 `H` 缺 `flip_v`，不要自行覆蓋 `camera_right_H.npy`。
+- 換場景拼得出圖，但對角黑洞／遠方模糊：幾何極限，不是沒拍到檔。
+
+更細的注意事項：`Code/Server/BEV_LIVE_CAPTURE.md`
 
 主要程式：
 
