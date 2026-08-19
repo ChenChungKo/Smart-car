@@ -73,8 +73,8 @@ python3 capture_live_surround.py --stitch
    - 對策：加長 sleep + 多讀幾幀再存。
 
 3. **裝置被佔用／超時**  
-   - 症狀：`select() timeout`、卡很久。  
-   - 對策：先釋放 CSI；USB 一個一個開；不要同時用預覽佔住同一 video。
+   - 症狀：`select() timeout`、卡很久（右側 `/dev/video18` 也曾在 MJPG 卡住）。  
+   - 對策：先 USB 再 CSI；優先 YUYV，有可用畫面就不要再試 MJPG；讀取連續失敗 3 次就換格式。
 
 4. **鏡頭前被線材擋住**  
    - 症狀：畫面邊緣大片糊白／糊黑近物。  

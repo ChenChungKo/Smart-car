@@ -1,7 +1,7 @@
 ## Smart Car
 
 這個 repository 是基於 Freenove 4WD Smart Car Kit for Raspberry Pi 改裝後的個人測試版本。  
-目前重點是保存整台車的功能測試、續航測試與硬體校正參數，方便日後重新部署或維修時快速確認。
+目前重點是保存整台車的功能測試、續航測試、硬體校正參數，以及四相機幾何環景（IPM）校正結果，方便日後重新部署或維修時快速確認。
 
 詳細操作筆記請看：
 
@@ -143,31 +143,60 @@ USB left/right/rear: 1920x1080，YUYV，6 FPS
 Code/Server/camera_test_images/
 ```
 
-## 相機標定與 BEV
+## 四相機環景（目前正式方法）
 
-目前四向環景配置：
+演算法是**幾何式環景 / IPM**（Inverse Perspective Mapping），不是深度學習 BEV。  
+流程：魚眼去畸變 → 每路地面單應 `H` → 扇形遮罩＋羽化拼接。  
+**不需要俯看圖。** 換場景可沿用同一組 `K/D/H`，前提是鏡頭相對車身沒被碰歪。
+
+四路對應（USB 編號會變，一律用 `usb_bus`）：
 
 ```text
-front = CSI camera_num=1（pinhole）
-left/right/rear = USB fisheye
+front = CSI Picamera2 camera_num=1（IMX219，內參用 fisheye）
+left  = USB usb-xhci-hcd.1-1
+right = USB usb-xhci-hcd.0-2
+rear  = USB usb-xhci-hcd.0-1.2
 ```
 
-主要工具：
+正式外參（公制棋盤）：
 
 ```text
-Code/Server/calibration_patterns/calibration_capture.py
-Code/Server/calibration_patterns/calibration_intrinsic.py
-Code/Server/capture_labeled_preview.py
-Code/Server/plane_map_calibrate.py
-Code/Server/plane_map_stitch.py
-Code/Server/bev_extrinsic.py
-Code/Server/bev_extrinsic_chessboard.py
+Code/Server/calibration_patterns/bev_extrinsic_metric_auto/
+```
+
+右側 `H` 必須是 `flip_h + flip_v`（繞右側棋盤在 BEV 上的中心）。  
+缺 `flip_v` 會把右後地面映到右前（例如綠膠帶會跑到右前輪）。  
+2026-08-06 確認版地縫差約 dy≈16 px，不要改用車身中心當 pivot 覆蓋。
+
+現場拍攝與拼接：
+
+```bash
+cd Code/Server
+python3 capture_live_surround.py --stitch
+```
+
+注意：
+
+- 拍攝順序：先 USB（left/right/rear），再 CSI front。
+- USB 優先 **YUYV**。MJPG 容易撕裂或 `select() timeout` 卡住。
+- 左側相機特別不穩，腳會多抓幾幀挑撕裂較小的一張。
+- 重開機後先跑 `v4l2-ctl --list-devices`，不要寫死 `/dev/videoX`。
+
+詳細操作、已知坑與驗證口訣：
+
+```text
+Code/Server/BEV_LIVE_CAPTURE.md
+```
+
+主要程式：
+
+```text
+Code/Server/capture_live_surround.py      # 現場四路拍攝（可 --stitch）
+Code/Server/metric_extrinsic_from_boards.py
 Code/Server/bev_deploy.py
 Code/Server/bev_stitch.py
+Code/Server/camera_hardware.json
 ```
-
-相機硬體對應、內參 K/D、外參 H、棋盤照片及目前 BEV 除錯輸出皆保存在
-repository，方便重建目前的標定狀態。
 
 ## 續航壓力測試
 
@@ -236,13 +265,14 @@ USB 相機請以 `v4l2-ctl --list-devices` 重新確認；程式會用 `usb_bus`
 
 ```text
 CAR_TESTING_GUIDE.md
+Code/Server/BEV_LIVE_CAPTURE.md
 Code/Server/full_car_test.py
 Code/Server/endurance_test.py
 Code/Server/params.json
 Code/Server/camera_hardware.json
 Code/Server/camera_devices.py
-Code/Server/plane_map_calibration.json
-Code/Server/calibration_patterns/
+Code/Server/capture_live_surround.py
+Code/Server/calibration_patterns/bev_extrinsic_metric_auto/
 ```
 
 ## 原始專案來源

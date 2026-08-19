@@ -54,7 +54,11 @@ def capture_usb_best(
 ) -> np.ndarray:
     best = None
     best_key = None
+    # YUYV first — MJPG on these UVC cams often tears or hangs on select() timeout.
     for fourcc in ("YUYV", "MJPG"):
+        if best is not None and fourcc == "MJPG":
+            # Already have a usable YUYV frame; do not risk MJPG hang.
+            break
         subprocess.run(
             [
                 "v4l2-ctl",
@@ -74,27 +78,37 @@ def capture_usb_best(
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         time.sleep(warmup_s)
-        for _ in range(n_flush):
-            cap.read()
-            time.sleep(0.03)
-        for i in range(n_candidates):
+        fail_streak = 0
+        got_any = False
+        for i in range(n_flush + n_candidates):
             ok, frame = cap.read()
-            time.sleep(0.05)
             if not ok or frame is None:
+                fail_streak += 1
+                # OpenCV V4L2 select() timeout is ~10s each; bail before hanging minutes.
+                if fail_streak >= 3:
+                    print(f"  {tag} {fourcc}: read timeout/fail x{fail_streak}, skip format")
+                    break
+                continue
+            fail_streak = 0
+            got_any = True
+            if i < n_flush:
                 continue
             if frame.shape[1] != width or frame.shape[0] != height:
                 frame = cv2.resize(frame, (width, height))
             mx, bottom, at_y = tear_score(frame)
             key = (mx, bottom, -float(frame.mean()))
+            cand_i = i - n_flush
             print(
-                f"  {tag} {fourcc}#{i}: tear={mx:.1f} bottom={bottom:.1f} "
+                f"  {tag} {fourcc}#{cand_i}: tear={mx:.1f} bottom={bottom:.1f} "
                 f"y={at_y} mean={frame.mean():.1f}"
             )
             if best is None or key < best_key:
                 best = (frame.copy(), fourcc, mx, bottom)
                 best_key = key
         cap.release()
-        if best is not None and fourcc == "YUYV" and best[2] < 40 and best[3] < 35:
+        if not got_any:
+            print(f"  {tag} {fourcc}: no frames")
+        if best is not None and fourcc == "YUYV" and best[2] < 45 and best[3] < 40:
             break
     if best is None:
         raise RuntimeError(f"{tag}: capture failed on /dev/video{index}")
