@@ -227,6 +227,62 @@ python3 bev_stitch.py --blend --feather 40 \
 
 更細的注意事項：`Code/Server/BEV_LIVE_CAPTURE.md`
 
+### 範例結果
+
+左欄為四路原圖（`raw_2x2.jpg`），右欄為拼接環景（`surround_square.jpg`）。圖片在 `docs/bev_examples/`。
+
+#### 在桌上
+
+<table>
+<tr>
+<td width="50%"><img src="docs/bev_examples/在桌上/raw_2x2.jpg" alt="在桌上 四路原圖" /></td>
+<td width="50%"><img src="docs/bev_examples/在桌上/surround_square.jpg" alt="在桌上 環景" /></td>
+</tr>
+<tr>
+<td align="center">四路原圖</td>
+<td align="center">環景結果</td>
+</tr>
+</table>
+
+#### 在綠色桌墊
+
+<table>
+<tr>
+<td width="50%"><img src="docs/bev_examples/在綠色桌墊/raw_2x2.jpg" alt="在綠色桌墊 四路原圖" /></td>
+<td width="50%"><img src="docs/bev_examples/在綠色桌墊/surround_square.jpg" alt="在綠色桌墊 環景" /></td>
+</tr>
+<tr>
+<td align="center">四路原圖</td>
+<td align="center">環景結果</td>
+</tr>
+</table>
+
+#### 放在地上
+
+<table>
+<tr>
+<td width="50%"><img src="docs/bev_examples/放在地上/raw_2x2.jpg" alt="放在地上 四路原圖" /></td>
+<td width="50%"><img src="docs/bev_examples/放在地上/surround_square.jpg" alt="放在地上 環景" /></td>
+</tr>
+<tr>
+<td align="center">四路原圖</td>
+<td align="center">環景結果</td>
+</tr>
+</table>
+
+#### 有放磁鐵
+
+<table>
+<tr>
+<td width="50%"><img src="docs/bev_examples/有放磁鐵/raw_2x2.jpg" alt="有放磁鐵 四路原圖" /></td>
+<td width="50%"><img src="docs/bev_examples/有放磁鐵/surround_square.jpg" alt="有放磁鐵 環景" /></td>
+</tr>
+<tr>
+<td align="center">四路原圖</td>
+<td align="center">環景結果</td>
+</tr>
+</table>
+
 主要程式：
 
 ```text
