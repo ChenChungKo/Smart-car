@@ -6,18 +6,17 @@
     "right",
     "rear"
   ],
-  "reprojection_error": 0.13784962783155347,
   "K_file": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/calibration_patterns/shared/usb_fisheye_K.npy",
   "D_file": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/calibration_patterns/shared/usb_fisheye_D.npy",
-  "fx": 372.51257780492904,
-  "fy": 488.0580380764694,
-  "cx": 331.7866022515497,
-  "cy": 208.40303580048922,
+  "fx": 353.8973447175507,
+  "fy": 466.73271187826765,
+  "cx": 326.92386041804826,
+  "cy": 244.4177227016006,
   "D": [
-    -0.019806667976527248,
-    -0.7282497030017842,
-    1.7581980511536424,
-    -1.3318629520839365
+    -0.0843011746385335,
+    -0.09711264490963306,
+    0.1510169890406613,
+    -0.07960139968821374
   ],
-  "notes": "\u4e09\u9846 BL 1080p S10 USB \u9b5a\u773c\u5171\u7528\u5de6\u76f8\u6a5f\u5167\u53c3\u3002"
+  "notes": "\u4e09\u9846 BL 1080p S10 USB \u9b5a\u773c\u5171\u7528\u540c\u4e00\u7d44\u5167\u53c3\u3002"
 }

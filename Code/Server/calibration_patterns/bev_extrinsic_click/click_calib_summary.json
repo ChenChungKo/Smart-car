@@ -1,0 +1,128 @@
+{
+  "method": "click_calib_smartcar_se2_bev",
+  "source_extrinsic_dir": "calibration_patterns/bev_extrinsic_metric",
+  "keypoints": "calibration_patterns/click_calib_keypoints_aug4.json",
+  "constraints": {
+    "scale": [
+      0.85,
+      1.15
+    ],
+    "theta_deg_max": 12.000000000000002,
+    "trans_px_max": 60.0,
+    "regularizer": 0.05
+  },
+  "initial_mde_px": 718.1528676554481,
+  "optimized_mde_px": 453.9486216124742,
+  "pair_mde_before": {
+    "front_left": 793.611438791339,
+    "front_right": 505.61695735575796,
+    "rear_left": 1019.4442069592055,
+    "rear_right": 553.9388675154895
+  },
+  "pair_mde_after": {
+    "front_left": 547.4579417896385,
+    "front_right": 289.4290380383278,
+    "rear_left": 823.3125593993399,
+    "rear_right": 155.5949472225906
+  },
+  "warnings": {
+    "front_left": {
+      "a": [],
+      "b": [],
+      "scale_a": 1.0,
+      "scale_b": 2.0
+    },
+    "front_right": {
+      "a": [],
+      "b": [],
+      "scale_a": 1.0,
+      "scale_b": 2.0
+    },
+    "rear_left": {
+      "a": [],
+      "b": [],
+      "scale_a": 2.0,
+      "scale_b": 2.0
+    },
+    "rear_right": {
+      "a": [],
+      "b": [],
+      "scale_a": 2.0,
+      "scale_b": 2.0
+    }
+  },
+  "cameras": {
+    "front": {
+      "surround_name": "front",
+      "H_file": "calibration_patterns/bev_extrinsic_click/camera_front_H.npy",
+      "affine_bev": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "se2_bev": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "left": {
+      "surround_name": "left",
+      "H_file": "calibration_patterns/bev_extrinsic_click/camera_left_H.npy",
+      "affine_bev": [
+        0.8314254606237348,
+        0.17672493719509544,
+        -0.17672493719509544,
+        0.8314254606237348,
+        60.0,
+        -13.402345370197596
+      ],
+      "se2_bev": [
+        0.85,
+        -0.20943951023931956,
+        60.0,
+        -13.402345370197596
+      ]
+    },
+    "right": {
+      "surround_name": "right",
+      "H_file": "calibration_patterns/bev_extrinsic_click/camera_right_H.npy",
+      "affine_bev": [
+        0.8314254606237348,
+        -0.17672493719509544,
+        0.17672493719509544,
+        0.8314254606237348,
+        -60.0,
+        -60.0
+      ],
+      "se2_bev": [
+        0.85,
+        0.20943951023931956,
+        -60.0,
+        -60.0
+      ]
+    },
+    "rear": {
+      "surround_name": "back",
+      "H_file": "calibration_patterns/bev_extrinsic_click/camera_back_H.npy",
+      "affine_bev": [
+        0.8314254606237348,
+        0.17672493719509544,
+        -0.17672493719509544,
+        0.8314254606237348,
+        -9.116918921039025,
+        -3.048191675513401
+      ],
+      "se2_bev": [
+        0.85,
+        -0.20943951023931956,
+        -9.116918921039025,
+        -3.048191675513401
+      ]
+    }
+  }
+}

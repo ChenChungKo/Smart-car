@@ -1,0 +1,37 @@
+{
+  "surround_data": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data",
+  "cameras": {
+    "front": {
+      "surround_name": "front",
+      "K": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/front/camera_front_K.npy",
+      "D": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/front/camera_front_D.npy",
+      "H": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/front/camera_front_H.npy",
+      "image": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/front/front.jpg",
+      "source_image": "camera_labeled/front_csi_cam1.jpg"
+    },
+    "left": {
+      "surround_name": "left",
+      "K": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/left/camera_left_K.npy",
+      "D": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/left/camera_left_D.npy",
+      "H": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/left/camera_left_H.npy",
+      "image": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/left/left.jpg",
+      "source_image": "camera_labeled/left_usb_video38.jpg"
+    },
+    "right": {
+      "surround_name": "right",
+      "K": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/right/camera_right_K.npy",
+      "D": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/right/camera_right_D.npy",
+      "H": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/right/camera_right_H.npy",
+      "image": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/right/right.jpg",
+      "source_image": "camera_labeled/right_usb_video18.jpg"
+    },
+    "rear": {
+      "surround_name": "back",
+      "K": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/back/camera_back_K.npy",
+      "D": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/back/camera_back_D.npy",
+      "H": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/back/camera_back_H.npy",
+      "image": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/back/back.jpg",
+      "source_image": "camera_labeled/rear_usb_video0.jpg"
+    }
+  }
+}

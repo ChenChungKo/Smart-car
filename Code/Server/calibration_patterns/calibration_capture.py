@@ -16,7 +16,7 @@ HARDWARE = SERVER / "camera_hardware.json"
 DEFAULT_OUTPUT = ROOT / "captures"
 
 sys.path.insert(0, str(SERVER))
-from camera_devices import resolve_usb_capture_index
+from camera_devices import resolve_usb_capture_index, create_csi_still_configuration
 
 
 def load_hardware():
@@ -37,6 +37,7 @@ def open_usb(device_index, width, height, warmup, warmup_frames):
     capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
     capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
+    capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # minimize driver-side frame queueing/latency
     time.sleep(warmup)
     for _ in range(warmup_frames):
         capture.read()
@@ -48,7 +49,7 @@ def open_csi(camera_num, width, height, warmup, warmup_frames):
     from picamera2 import Picamera2
 
     camera = Picamera2(camera_num=camera_num)
-    config = camera.create_still_configuration(main={"size": (width, height)})
+    config = create_csi_still_configuration(camera, width, height)
     camera.configure(config)
     camera.start()
     camera.set_controls({"AeEnable": True, "AwbEnable": True})
@@ -64,24 +65,88 @@ def read_csi(camera):
 
 
 def detect_board(gray, board_size):
-    flags = cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE
-    ok, corners = cv2.findChessboardCorners(gray, board_size, flags)
-    if not ok:
-        return False, None
-    corners = cv2.cornerSubPix(
-        gray,
-        corners,
-        (5, 5),
-        (-1, -1),
-        (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001),
+    """Try several OpenCV detectors; steep angles/low light often fail the default finder."""
+    import numpy as np
+
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+    flag_sets = [
+        cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE,
+        cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE | cv2.CALIB_CB_FILTER_QUADS,
+        cv2.CALIB_CB_ADAPTIVE_THRESH,
+    ]
+    for flags in flag_sets:
+        ok, corners = cv2.findChessboardCorners(gray, board_size, flags)
+        if ok:
+            corners = cv2.cornerSubPix(gray, corners, (5, 5), (-1, -1), criteria)
+            return True, corners
+
+    if hasattr(cv2, "findChessboardCornersSB"):
+        sb_flags = 0
+        if hasattr(cv2, "CALIB_CB_EXHAUSTIVE"):
+            sb_flags |= cv2.CALIB_CB_EXHAUSTIVE
+        if hasattr(cv2, "CALIB_CB_ACCURACY"):
+            sb_flags |= cv2.CALIB_CB_ACCURACY
+        ok, corners = cv2.findChessboardCornersSB(gray, board_size, flags=sb_flags)
+        if ok and corners is not None:
+            return True, corners.astype(np.float32)
+
+    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+    ok, corners = cv2.findChessboardCorners(
+        blurred,
+        board_size,
+        cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE,
     )
-    return True, corners
+    if ok:
+        corners = cv2.cornerSubPix(blurred, corners, (5, 5), (-1, -1), criteria)
+        return True, corners
+    return False, None
 
 
-def draw_status(frame, ok, saved_count, camera_name, batch_no, batch_saved, batch_size, manual=False, step=False):
+def detect_board_preview(gray, board_size, max_width=960):
+    """Fast preview-only detection on a downscaled frame."""
+    import numpy as np
+
+    height, width = gray.shape[:2]
+    scale = 1.0
+    if width > max_width:
+        scale = max_width / width
+        small = cv2.resize(
+            gray,
+            (max_width, int(height * scale)),
+            interpolation=cv2.INTER_AREA,
+        )
+    else:
+        small = gray
+
+    flags = cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE
+    ok, corners = cv2.findChessboardCorners(small, board_size, flags)
+    if not ok and hasattr(cv2, "findChessboardCornersSB"):
+        ok, corners = cv2.findChessboardCornersSB(small, board_size)
+    if ok and corners is not None:
+        if scale != 1.0:
+            corners = corners.astype(np.float32) / scale
+        return True, corners
+    return False, None
+
+
+def preview_display_frame(frame, max_width=1280):
+    height, width = frame.shape[:2]
+    if width <= max_width:
+        return frame
+    scale = max_width / width
+    return cv2.resize(
+        frame,
+        (max_width, int(height * scale)),
+        interpolation=cv2.INTER_AREA,
+    )
+
+
+def draw_status(frame, ok, saved_count, camera_name, batch_no, batch_saved, batch_size, manual=False, step=False, max_count=0):
     if step:
         mode = "ENTER=save  q=quit"
         hint = "Move board, then press ENTER in terminal"
+        if max_count > 0:
+            mode = f"{saved_count}/{max_count} | ENTER=save  q=quit"
     elif manual:
         mode = "SPACE=save  q=quit"
         hint = "Move board before each SPACE"
@@ -186,32 +251,54 @@ def capture_step_loop(read_frame, release, output_dir, camera_name, board_size, 
 
     def preview_loop():
         cv2.namedWindow(window, cv2.WINDOW_NORMAL)
+        last_detect = 0.0
+        ok_board = False
+        corners = None
         while state["running"]:
             ok_frame, frame = read_frame()
             if not ok_frame or frame is None:
                 time.sleep(0.05)
                 continue
 
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            ok_board, corners = detect_board(gray, board_size)
-            with lock:
-                state["frame"] = frame.copy()
-                state["ok_board"] = ok_board
+            now = time.time()
+            if now - last_detect >= 0.15:
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                ok_board, corners = detect_board_preview(gray, board_size)
+                last_detect = now
+                with lock:
+                    state["frame"] = frame.copy()
+                    state["ok_board"] = ok_board
+            else:
+                with lock:
+                    state["frame"] = frame.copy()
 
             display = frame.copy()
-            if ok_board:
+            if ok_board and corners is not None:
                 cv2.drawChessboardCorners(display, board_size, corners, ok_board)
-            draw_status(display, ok_board, state["saved_count"], camera_name, 1, state["saved_count"], 0, step=True)
-            cv2.imshow(window, display)
+            draw_status(
+                display,
+                ok_board,
+                state["saved_count"],
+                camera_name,
+                1,
+                state["saved_count"],
+                0,
+                step=True,
+                max_count=max_count,
+            )
+            cv2.imshow(window, preview_display_frame(display))
             key = cv2.waitKey(1) & 0xFF
             if key in (ord("q"), 27):
                 state["quit"] = True
-            time.sleep(0.03)
+            time.sleep(0.01)
 
         cv2.destroyAllWindows()
 
     print("Step mode: move the board, press ENTER in terminal to save one photo.")
-    print("Type q then ENTER to finish.")
+    if max_count > 0:
+        print(f"Will stop automatically after {max_count} saved photos.")
+    else:
+        print("Type q then ENTER to finish.")
 
     preview_thread = None
     if preview:
@@ -366,7 +453,7 @@ def main():
     parser.add_argument("--warmup-frames", type=int, default=10)
     parser.add_argument("--manual", action="store_true", help="Step mode: live preview + ENTER in terminal to save.")
     parser.add_argument("--no-preview", action="store_true", help="Disable live preview window in step mode.")
-    parser.add_argument("--count", type=int, default=0, help="Step mode: stop after N saved photos (0 = until q).")
+    parser.add_argument("--count", type=int, default=15, help="Step mode: stop after N saved photos (0 = until q).")
     parser.add_argument("--auto-count", type=int, default=0, help="Auto mode: save N photos when board is visible.")
     parser.add_argument("--auto-interval", type=float, default=3.0, help="Auto mode: seconds between saves.")
     parser.add_argument("--batch-size", type=int, default=5, help="Batch mode: photos per batch.")

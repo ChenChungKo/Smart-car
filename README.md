@@ -1,7 +1,7 @@
 ## Smart Car
 
 這個 repository 是基於 Freenove 4WD Smart Car Kit for Raspberry Pi 改裝後的個人測試版本。  
-目前重點是保存整台車的功能測試、續航測試與硬體校正參數，方便日後重新部署或維修時快速確認。
+目前重點是保存整台車的功能測試、續航測試、硬體校正參數，以及四相機幾何環景（IPM）校正結果，方便日後重新部署或維修時快速確認。
 
 詳細操作筆記請看：
 
@@ -143,31 +143,167 @@ USB left/right/rear: 1920x1080，YUYV，6 FPS
 Code/Server/camera_test_images/
 ```
 
-## 相機標定與 BEV
+## 四相機環景（目前正式方法）
 
-目前四向環景配置：
+演算法是**幾何式環景 / IPM**（Inverse Perspective Mapping），不是深度學習 BEV。  
+流程：魚眼去畸變 → 每路地面單應 `H` → 扇形遮罩＋羽化拼接。  
+**不需要俯看圖。** 換場景可沿用同一組 `K/D/H`，前提是鏡頭相對車身沒被碰歪。
+
+**拼接成功的關鍵：** 不是對齊俯拍照，而是把**四面棋盤在地面上的真實座標**（以及車身四角）量好寫進 layout。  
+每路影像偵測棋盤角點後，與這些公制座標對應，才能估出把畫面拉到同一俯視平面的 `H`。四面座標缺一、或量錯，那路就會歪、對不齊。
+
+座標檔：
 
 ```text
-front = CSI camera_num=1（pinhole）
-left/right/rear = USB fisheye
+Code/Server/calibration_patterns/metric_layout_aug3.json
 ```
 
-主要工具：
+裡面包含：墊子尺寸、每路棋盤一個已知角的 (long, short) cm、車身四角 cm。  
+腳本 `metric_extrinsic_from_boards.py` 依此算出 `bev_extrinsic_metric_auto/` 的四個 `H`。
+
+四路對應（USB 編號會變，一律用 `usb_bus`）：
 
 ```text
-Code/Server/calibration_patterns/calibration_capture.py
-Code/Server/calibration_patterns/calibration_intrinsic.py
-Code/Server/capture_labeled_preview.py
-Code/Server/plane_map_calibrate.py
-Code/Server/plane_map_stitch.py
-Code/Server/bev_extrinsic.py
-Code/Server/bev_extrinsic_chessboard.py
+front = CSI Picamera2 camera_num=1（IMX219，內參用 fisheye）
+left  = USB usb-xhci-hcd.1-1
+right = USB usb-xhci-hcd.0-2
+rear  = USB usb-xhci-hcd.0-1.2
+```
+
+正式外參（公制棋盤）：
+
+```text
+Code/Server/calibration_patterns/bev_extrinsic_metric_auto/
+```
+
+右側 `H` 必須是 `flip_h + flip_v`（繞右側棋盤在 BEV 上的中心）。  
+缺 `flip_v` 會把右後地面映到右前（例如綠膠帶會跑到右前輪）。  
+2026-08-06 確認版地縫差約 dy≈16 px，不要改用車身中心當 pivot 覆蓋。
+
+### 如何拍攝並拼出環景
+
+1. 確認相機沒被其他程式佔用，重開機後先對一下 USB 節點：
+
+```bash
+v4l2-ctl --list-devices
+```
+
+每個 USB Camera 條目下**第一個** `/dev/videoX` 才是擷取節點。程式會依 `camera_hardware.json` 的 `usb_bus` 自動對應，不要寫死編號。
+
+2. 進入 Server 目錄，四路各拍一張並立刻拼接：
+
+```bash
+cd /home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server
+python3 capture_live_surround.py --stitch
+```
+
+腳本會：**先拍 USB left → right → rear，再拍 CSI front**（先開 CSI 容易跟 USB 搶裝置）。  
+USB 優先用 YUYV；左側會連拍多幀，挑撕裂較小的一張。
+
+3. 看結果：
+
+```text
+四路原圖：Code/Server/camera_labeled_live_now/{front,left,right,rear}.jpg
+四路併圖：Code/Server/bev_output/live_now_stitch/raw_2x2.jpg
+環景結果：Code/Server/bev_output/live_now_stitch/surround_square.jpg
+```
+
+只拍照、先不拼接：
+
+```bash
+python3 capture_live_surround.py
+```
+
+已有四張圖（檔名需含 `front` / `left` / `right` / `rear`）時，手動部署再拼接：
+
+```bash
+python3 bev_deploy.py \
+  --extrinsic-dir calibration_patterns/bev_extrinsic_metric_auto \
+  --labeled-dir camera_labeled_live_now
+
+python3 bev_stitch.py --blend --feather 40 \
+  --car-width 207 --car-height 333 \
+  --car-center-x 506 --car-center-y 511 \
+  --output-dir bev_output/live_now_stitch
+```
+
+車身遮罩數字來自  
+`calibration_patterns/bev_extrinsic_metric_auto/metric_extrinsic_auto_summary.json` 的 `car_mask_px`。
+
+常見狀況：
+
+- 左側畫面像被橫切、地磚縫錯位：MJPG 撕裂。腳本已優先 YUYV。
+- `select() timeout` 卡住很久：USB 被佔用或 MJPG 掛住。關掉其他預覽後重跑。
+- 環景右後標物跑到右前：右側 `H` 缺 `flip_v`，不要自行覆蓋 `camera_right_H.npy`。
+- 換場景拼得出圖，但對角黑洞／遠方模糊：幾何極限，不是沒拍到檔。
+
+更細的注意事項：`Code/Server/BEV_LIVE_CAPTURE.md`
+
+### 範例結果
+
+左欄為四路原圖（`raw_2x2.jpg`），右欄為拼接環景（`surround_square.jpg`）。圖片在 `docs/bev_examples/`。
+
+#### 在桌上
+
+<table>
+<tr>
+<td width="50%"><img src="docs/bev_examples/在桌上/raw_2x2.jpg" alt="在桌上 四路原圖" /></td>
+<td width="50%"><img src="docs/bev_examples/在桌上/surround_square.jpg" alt="在桌上 環景" /></td>
+</tr>
+<tr>
+<td align="center">四路原圖</td>
+<td align="center">環景結果</td>
+</tr>
+</table>
+
+#### 在綠色桌墊
+
+<table>
+<tr>
+<td width="50%"><img src="docs/bev_examples/在綠色桌墊/raw_2x2.jpg" alt="在綠色桌墊 四路原圖" /></td>
+<td width="50%"><img src="docs/bev_examples/在綠色桌墊/surround_square.jpg" alt="在綠色桌墊 環景" /></td>
+</tr>
+<tr>
+<td align="center">四路原圖</td>
+<td align="center">環景結果</td>
+</tr>
+</table>
+
+#### 放在地上
+
+<table>
+<tr>
+<td width="50%"><img src="docs/bev_examples/放在地上/raw_2x2.jpg" alt="放在地上 四路原圖" /></td>
+<td width="50%"><img src="docs/bev_examples/放在地上/surround_square.jpg" alt="放在地上 環景" /></td>
+</tr>
+<tr>
+<td align="center">四路原圖</td>
+<td align="center">環景結果</td>
+</tr>
+</table>
+
+#### 有放磁鐵
+
+<table>
+<tr>
+<td width="50%"><img src="docs/bev_examples/有放磁鐵/raw_2x2.jpg" alt="有放磁鐵 四路原圖" /></td>
+<td width="50%"><img src="docs/bev_examples/有放磁鐵/surround_square.jpg" alt="有放磁鐵 環景" /></td>
+</tr>
+<tr>
+<td align="center">四路原圖</td>
+<td align="center">環景結果</td>
+</tr>
+</table>
+
+主要程式：
+
+```text
+Code/Server/capture_live_surround.py      # 現場四路拍攝（可 --stitch）
+Code/Server/metric_extrinsic_from_boards.py
 Code/Server/bev_deploy.py
 Code/Server/bev_stitch.py
+Code/Server/camera_hardware.json
 ```
-
-相機硬體對應、內參 K/D、外參 H、棋盤照片及目前 BEV 除錯輸出皆保存在
-repository，方便重建目前的標定狀態。
 
 ## 續航壓力測試
 
@@ -236,13 +372,14 @@ USB 相機請以 `v4l2-ctl --list-devices` 重新確認；程式會用 `usb_bus`
 
 ```text
 CAR_TESTING_GUIDE.md
+Code/Server/BEV_LIVE_CAPTURE.md
 Code/Server/full_car_test.py
 Code/Server/endurance_test.py
 Code/Server/params.json
 Code/Server/camera_hardware.json
 Code/Server/camera_devices.py
-Code/Server/plane_map_calibration.json
-Code/Server/calibration_patterns/
+Code/Server/capture_live_surround.py
+Code/Server/calibration_patterns/bev_extrinsic_metric_auto/
 ```
 
 ## 原始專案來源

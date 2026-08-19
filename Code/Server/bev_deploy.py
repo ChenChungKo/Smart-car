@@ -26,11 +26,9 @@ CAMERAS = (
 
 
 def load_kd(camera_name):
-    if camera_name in ("left", "right", "rear"):
-        return (
-            CALIB / "shared" / "usb_fisheye_K.npy",
-            CALIB / "shared" / "usb_fisheye_D.npy",
-        )
+    # Each camera now has its own individually-calibrated K/D (captured with
+    # calibration_capture_smart.py). Previously left/right/rear shared one
+    # "usb_fisheye" K/D, which ignored real per-unit manufacturing variance.
     return (
         CALIB / "captures" / camera_name / "camera_0_K.npy",
         CALIB / "captures" / camera_name / "camera_0_D.npy",

@@ -25,12 +25,10 @@ def load_json(path):
 
 
 def load_kd(camera_name):
-    if camera_name in ("left", "right", "rear"):
-        k_path = CALIB / "shared" / "usb_fisheye_K.npy"
-        d_path = CALIB / "shared" / "usb_fisheye_D.npy"
-    else:
-        k_path = CALIB / "captures" / camera_name / "camera_0_K.npy"
-        d_path = CALIB / "captures" / camera_name / "camera_0_D.npy"
+    # Each camera now has its own individually-calibrated K/D; left/right/rear no
+    # longer share one "usb_fisheye" set (see calibration_capture_smart.py).
+    k_path = CALIB / "captures" / camera_name / "camera_0_K.npy"
+    d_path = CALIB / "captures" / camera_name / "camera_0_D.npy"
     if not k_path.exists() or not d_path.exists():
         raise FileNotFoundError(f"Missing K/D for {camera_name}: {k_path}, {d_path}")
     return np.load(k_path), np.load(d_path)

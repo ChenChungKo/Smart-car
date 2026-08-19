@@ -195,7 +195,11 @@ class EnduranceTester:
             try:
                 output_path = self.args.output_dir / f"picamera_{camera_index}_latest.jpg"
                 camera = Picamera2(camera_num=camera_index)
-                config = camera.create_still_configuration(main={"size": (self.args.camera_width, self.args.camera_height)})
+                from camera_devices import create_csi_still_configuration
+
+                config = create_csi_still_configuration(
+                    camera, self.args.camera_width, self.args.camera_height
+                )
                 camera.configure(config)
                 camera.start()
                 time.sleep(self.args.camera_warmup)

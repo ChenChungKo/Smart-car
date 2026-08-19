@@ -1,0 +1,37 @@
+{
+  "surround_data": "calibration_patterns/surround_data_quad",
+  "cameras": {
+    "front": {
+      "surround_name": "front",
+      "K": "calibration_patterns/surround_data_quad/front/camera_front_K.npy",
+      "D": "calibration_patterns/surround_data_quad/front/camera_front_D.npy",
+      "H": "calibration_patterns/surround_data_quad/front/camera_front_H.npy",
+      "image": "calibration_patterns/surround_data_quad/front/front.jpg",
+      "source_image": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/camera_labeled/front_csi_cam1.jpg"
+    },
+    "left": {
+      "surround_name": "left",
+      "K": "calibration_patterns/surround_data_quad/left/camera_left_K.npy",
+      "D": "calibration_patterns/surround_data_quad/left/camera_left_D.npy",
+      "H": "calibration_patterns/surround_data_quad/left/camera_left_H.npy",
+      "image": "calibration_patterns/surround_data_quad/left/left.jpg",
+      "source_image": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/camera_labeled/left_usb_video0.jpg"
+    },
+    "right": {
+      "surround_name": "right",
+      "K": "calibration_patterns/surround_data_quad/right/camera_right_K.npy",
+      "D": "calibration_patterns/surround_data_quad/right/camera_right_D.npy",
+      "H": "calibration_patterns/surround_data_quad/right/camera_right_H.npy",
+      "image": "calibration_patterns/surround_data_quad/right/right.jpg",
+      "source_image": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/camera_labeled/right_usb_video10.jpg"
+    },
+    "rear": {
+      "surround_name": "back",
+      "K": "calibration_patterns/surround_data_quad/back/camera_back_K.npy",
+      "D": "calibration_patterns/surround_data_quad/back/camera_back_D.npy",
+      "H": "calibration_patterns/surround_data_quad/back/camera_back_H.npy",
+      "image": "calibration_patterns/surround_data_quad/back/back.jpg",
+      "source_image": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/camera_labeled/rear_usb_video37.jpg"
+    }
+  }
+}

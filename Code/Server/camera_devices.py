@@ -4,6 +4,46 @@ import re
 import subprocess
 from pathlib import Path
 
+# IMX219 native 640x480 mode center-crops the sensor (~1280x960 region) and looks zoomed in.
+# Scale from this full 4:3 mode instead when output is smaller.
+IMX219_FULL_FOV_RAW = (1640, 1232)
+
+
+def create_csi_still_configuration(camera, width, height):
+    """Picamera2 still config that keeps IMX219 full field of view when downscaling."""
+    full_w, full_h = IMX219_FULL_FOV_RAW
+    if width <= full_w and height <= full_h:
+        target_aspect = width / height
+        full_aspect = full_w / full_h
+        if abs(target_aspect - full_aspect) < 0.05:
+            return camera.create_still_configuration(
+                main={"size": (width, height)},
+                raw={"size": IMX219_FULL_FOV_RAW},
+            )
+    return camera.create_still_configuration(main={"size": (width, height)})
+
+
+def bev_size_scale(camera_name, default_scale=2.0):
+    """All four cameras are now calibrated with the fisheye model; same scale for all.
+
+    (Historically front used a "normal"/pinhole model whose 2x undistort cropped to a
+    circle, so this forced 1.0 for front only. That model was wrong for this lens —
+    see camera_hardware.json front notes — so front no longer needs the override.)
+    """
+    return default_scale
+
+
+def bev_focal_scale(camera_name, default_focal_scale=1.0):
+    """Per-camera focal-scale override hook (currently a no-op passthrough).
+
+    Zooming the front CSI camera in (focal_scale > 1) sharpens/straightens the
+    nearby chessboard but shrinks the mapped ground footprint, leaving black
+    gaps at the front sector's far corners in the stitched BEV — a net loss.
+    Kept as an explicit hook in case a future tuning finds a value that helps
+    without that coverage trade-off.
+    """
+    return default_focal_scale
+
 
 def parse_video_index(device_text):
     if "/dev/video" in device_text:

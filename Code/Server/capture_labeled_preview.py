@@ -16,7 +16,7 @@ HARDWARE = SERVER / "camera_hardware.json"
 DEFAULT_OUTPUT = SERVER / "camera_labeled"
 
 sys.path.insert(0, str(SERVER))
-from camera_devices import resolve_usb_capture_index
+from camera_devices import resolve_usb_capture_index, create_csi_still_configuration
 
 
 def load_hardware():
@@ -78,7 +78,7 @@ def open_csi(camera_num, width, height, warmup, warmup_frames):
     from picamera2 import Picamera2
 
     camera = Picamera2(camera_num=camera_num)
-    config = camera.create_still_configuration(main={"size": (width, height)})
+    config = create_csi_still_configuration(camera, width, height)
     camera.configure(config)
     camera.start()
     camera.set_controls({"AeEnable": True, "AwbEnable": True})
@@ -90,7 +90,7 @@ def open_csi(camera_num, width, height, warmup, warmup_frames):
 
 
 def capture_with_preview(read_frame, release, output_path, camera_name, board_size, require_board):
-    """Live preview window + save by pressing ENTER in the terminal."""
+    """Live preview window + save by pressing ENTER/f/q inside the OpenCV window (no TTY needed)."""
     window = f"labeled-{camera_name}"
     state = {"frame": None, "ok_board": False, "running": True, "quit": False, "save": None}
     lock = threading.Lock()
@@ -112,7 +112,7 @@ def capture_with_preview(read_frame, release, output_path, camera_name, board_si
                 cv2.drawChessboardCorners(display, board_size, corners, True)
             status = (
                 f"{camera_name} | board={'OK' if ok_board else 'not found'} | "
-                "TERMINAL: Enter=save  f=force  q=quit"
+                "Enter=save  f=force save  q=quit"
             )
             color = (0, 255, 0) if ok_board else (0, 0, 255)
             cv2.putText(display, status, (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
@@ -128,10 +128,7 @@ def capture_with_preview(read_frame, release, output_path, camera_name, board_si
         cv2.destroyAllWindows()
 
     print(f"Live preview: {camera_name}")
-    print(">>> 請在【終端機】操作：")
-    print("  Enter = 存檔（有偵測到棋盤）")
-    print("  f 再 Enter = 強制存檔（偵測不到也可以）")
-    print("  q 再 Enter = 取消")
+    print(">>> 請在跳出的視窗上操作：Enter=存檔  f=強制存檔  q=取消")
 
     preview_thread = threading.Thread(target=preview_loop, daemon=True)
     preview_thread.start()
@@ -144,21 +141,15 @@ def capture_with_preview(read_frame, release, output_path, camera_name, board_si
                 print("Cancelled.")
                 break
 
-            window_save = state.get("save")
-            if window_save:
+            with lock:
+                window_save = state["save"]
                 state["save"] = None
-                answer = "f" if window_save == "force" else ""
-            else:
-                with lock:
-                    ok_board = state["ok_board"]
-                status = "board OK" if ok_board else "board NOT found"
-                answer = input(f"\n{camera_name} | {status} | Enter=save, f=force, q=quit: ").strip().lower()
 
-            if answer in ("q", "quit", "exit") or state["quit"]:
-                print("Cancelled.")
-                break
-            force = answer in ("f", "force")
+            if window_save is None:
+                time.sleep(0.05)
+                continue
 
+            force = window_save == "force"
             with lock:
                 frame = None if state["frame"] is None else state["frame"].copy()
                 ok_board = state["ok_board"]
@@ -166,7 +157,7 @@ def capture_with_preview(read_frame, release, output_path, camera_name, board_si
                 print("No frame yet — wait for preview, then try again.")
                 continue
             if require_board and not ok_board and not force:
-                print("Board not found — adjust board, press Enter again, or type f then Enter to force-save.")
+                print("Board not found — adjust board, press Enter again, or f to force-save.")
                 continue
 
             cv2.imwrite(str(output_path), frame)

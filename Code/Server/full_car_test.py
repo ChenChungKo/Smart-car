@@ -398,6 +398,10 @@ class FullCarTester:
 
     def test_cameras(self):
         self.test_picameras()
+        # CSI close can briefly re-enumerate USB cameras; wait before resolving.
+        settle = max(self.args.camera_settle, 2.0)
+        print(f"Waiting {settle:.1f}s for USB cameras to settle after CSI...")
+        time.sleep(settle)
         self.test_named_usb_cameras()
 
     def save_usb_frame_with_exif(self, output_path, frame, position, camera_entry):
@@ -445,8 +449,10 @@ class FullCarTester:
             camera = None
             try:
                 camera = Picamera2(camera_num=camera_index)
-                config = camera.create_still_configuration(
-                    main={"size": (capture_width, capture_height)}
+                from camera_devices import create_csi_still_configuration
+
+                config = create_csi_still_configuration(
+                    camera, capture_width, capture_height
                 )
                 camera.configure(config)
                 camera.start()
@@ -469,28 +475,38 @@ class FullCarTester:
         output_dir.mkdir(parents=True, exist_ok=True)
         hardware = self.load_camera_hardware()
         positions = ("left", "right", "rear")
+        capture_width = self.args.camera_width
+        capture_height = self.args.camera_height
+        max_attempts = 3
 
         for index, position in enumerate(positions, start=1):
             # Resolve immediately before opening. A USB camera can reconnect and
             # receive a new /dev/video index while Picamera/libcamera is running.
             entry = hardware[position]
+            ok = False
+            frame = None
+            device_index = None
             try:
-                device_index, resolved = resolve_usb_capture_index(entry)
-                capture_width = self.args.camera_width
-                capture_height = self.args.camera_height
-                output_path = output_dir / f"usb_{position}_video{device_index}.jpg"
-                print(
-                    f"\nTesting {position} USB camera "
-                    f"/dev/video{device_index} ({resolved}), "
-                    f"capture_size={capture_width}x{capture_height}, output={output_path}"
-                )
-                ok, frame = self.capture_usb_frame(
-                    device_index,
-                    width=capture_width,
-                    height=capture_height,
-                    fourcc="YUYV",
-                    fps=6,
-                )
+                for attempt in range(1, max_attempts + 1):
+                    device_index, resolved = resolve_usb_capture_index(entry)
+                    output_path = output_dir / f"usb_{position}_video{device_index}.jpg"
+                    print(
+                        f"\nTesting {position} USB camera "
+                        f"/dev/video{device_index} ({resolved}), "
+                        f"capture_size={capture_width}x{capture_height}, "
+                        f"attempt={attempt}/{max_attempts}, output={output_path}"
+                    )
+                    ok, frame = self.capture_usb_frame(
+                        device_index,
+                        width=capture_width,
+                        height=capture_height,
+                        fourcc="YUYV",
+                        fps=6,
+                    )
+                    if ok:
+                        break
+                    print(f"  {position}: open/read failed, re-resolving usb_bus...")
+                    time.sleep(1.0)
                 if not ok:
                     print(f"  {position}: capture failed")
                 else:
@@ -500,7 +516,10 @@ class FullCarTester:
                         position,
                         entry,
                     )
-                    print(f"  {position}: capture OK, actual_size={frame.shape[1]}x{frame.shape[0]}")
+                    print(
+                        f"  {position}: capture OK, "
+                        f"actual_size={frame.shape[1]}x{frame.shape[0]}"
+                    )
             except Exception as exc:
                 print(f"  {position}: capture failed: {exc}")
             if index < len(positions):
@@ -513,8 +532,13 @@ class FullCarTester:
         camera = None
         try:
             camera = Picamera2(camera_num=device_index)
-            config = camera.create_still_configuration(
-                main={"size": (self.args.camera_width, self.args.camera_height)}
+            capture_width = self.args.csi_camera_width
+            capture_height = self.args.csi_camera_height
+            print(f"  CSI capture size: {capture_width}x{capture_height}")
+            from camera_devices import create_csi_still_configuration
+
+            config = create_csi_still_configuration(
+                camera, capture_width, capture_height
             )
             camera.configure(config)
             camera.start()
@@ -897,10 +921,10 @@ def build_parser():
     )
     parser.add_argument("--labeled-camera-dir", default="camera_labeled", help="Directory for labeled front/left/right/rear captures.")
     parser.add_argument("--camera-dir", default="camera_test_images", help="Directory for multi-camera captures.")
-    parser.add_argument("--camera-width", type=int, default=1920, help="USB capture width for multi-camera tests.")
-    parser.add_argument("--camera-height", type=int, default=1080, help="USB capture height for multi-camera tests.")
-    parser.add_argument("--csi-camera-width", type=int, default=1920, help="CSI capture width for multi-camera tests.")
-    parser.add_argument("--csi-camera-height", type=int, default=1440, help="CSI capture height for multi-camera tests.")
+    parser.add_argument("--camera-width", type=int, default=640, help="USB capture width for multi-camera tests.")
+    parser.add_argument("--camera-height", type=int, default=480, help="USB capture height for multi-camera tests.")
+    parser.add_argument("--csi-camera-width", type=int, default=640, help="CSI capture width for multi-camera tests.")
+    parser.add_argument("--csi-camera-height", type=int, default=480, help="CSI capture height for multi-camera tests.")
     parser.add_argument("--camera-warmup", type=float, default=2.0, help="Seconds to wait after opening each camera before discarding warmup frames.")
     parser.add_argument("--camera-warmup-frames", type=int, default=15, help="Number of preview frames to discard so auto-exposure can settle.")
     parser.add_argument("--camera-settle", type=float, default=1.0, help="Seconds to wait between closing one camera and opening the next.")
