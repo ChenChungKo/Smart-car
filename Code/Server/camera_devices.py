@@ -2,7 +2,12 @@
 
 import re
 import subprocess
+import threading
+import time
 from pathlib import Path
+
+_USB_NODES_LOCK = threading.Lock()
+_USB_NODES_CACHE: tuple[float, dict] = (0.0, {})
 
 # IMX219 native 640x480 mode center-crops the sensor (~1280x960 region) and looks zoomed in.
 # Scale from this full 4:3 mode instead when output is smaller.
@@ -17,10 +22,33 @@ def create_csi_still_configuration(camera, width, height):
         full_aspect = full_w / full_h
         if abs(target_aspect - full_aspect) < 0.05:
             return camera.create_still_configuration(
-                main={"size": (width, height)},
+                main={"size": (width, height), "format": "RGB888"},
                 raw={"size": IMX219_FULL_FOV_RAW},
             )
-    return camera.create_still_configuration(main={"size": (width, height)})
+    return camera.create_still_configuration(
+        main={"size": (width, height), "format": "RGB888"}
+    )
+
+
+def create_csi_preview_configuration(camera, width=640, height=480):
+    """Same pipeline as single-shot CSI captures (camera_test_images/picamera_*.jpg).
+
+    Video mode is a different colour path; live preview must use still config.
+    """
+    return create_csi_still_configuration(camera, width, height)
+
+
+def csi_array_to_bgr(arr):
+    """Picamera2 capture_array() on this Pi is already OpenCV BGR.
+
+    Format is advertised as RGB888, but the numpy buffer matches the JPEG from
+    capture_file() only if treated as BGR. RGB2BGR here turns purple into orange.
+    """
+    if arr is None:
+        return None
+    if arr.ndim == 3 and arr.shape[2] >= 3:
+        return arr[:, :, :3].copy()
+    return arr
 
 
 def bev_size_scale(camera_name, default_scale=2.0):
@@ -51,52 +79,75 @@ def parse_video_index(device_text):
     raise ValueError(f"Unsupported USB device string: {device_text}")
 
 
-def list_usb_capture_nodes():
+def list_usb_capture_nodes(*, force: bool = False):
     """Return {usb_bus: first_capture_video_index} from v4l2-ctl."""
+    global _USB_NODES_CACHE
+    now = time.monotonic()
+    with _USB_NODES_LOCK:
+        cached_at, cached = _USB_NODES_CACHE
+        if not force and cached and now - cached_at < 1.0:
+            return dict(cached)
     try:
-        text = subprocess.check_output(["v4l2-ctl", "--list-devices"], text=True, stderr=subprocess.STDOUT)
+        text = subprocess.check_output(
+            ["v4l2-ctl", "--list-devices"], text=True, stderr=subprocess.STDOUT
+        )
     except (subprocess.CalledProcessError, FileNotFoundError) as exc:
         raise RuntimeError("v4l2-ctl --list-devices failed") from exc
 
     mapping = {}
     current_bus = None
     for line in text.splitlines():
-        bus_match = re.search(r"\((usb-[^)]+)\)", line)
-        if bus_match and "USB" in line:
-            current_bus = bus_match.group(1)
+        if not line.startswith("\t") and line.strip():
+            bus_match = re.search(r"\((usb-[^)]+)\)", line)
+            current_bus = (
+                bus_match.group(1) if bus_match and "USB" in line else None
+            )
             continue
         dev_match = re.match(r"\t/dev/video(\d+)", line)
         if dev_match and current_bus and current_bus not in mapping:
             mapping[current_bus] = int(dev_match.group(1))
-    return mapping
+    with _USB_NODES_LOCK:
+        _USB_NODES_CACHE = (time.monotonic(), mapping)
+    return dict(mapping)
 
 
-def resolve_usb_capture_index(camera_entry):
+def resolve_usb_capture_index(camera_entry, occupied=None, force_list=False):
     """
     Pick the capture node for one USB camera entry from camera_hardware.json.
-    Prefer stable usb_bus; fall back to configured device if it opens.
+    Prefer stable usb_bus. Never probe-open a node (that resets other UVC
+    cameras) and never return a node already claimed by another role.
     """
-    import cv2
-
+    occupied = {int(idx) for idx in (occupied or [])}
     usb_bus = camera_entry.get("usb_bus", "")
     configured = camera_entry.get("device", "")
+    try:
+        nodes = list_usb_capture_nodes(force=force_list)
+    except RuntimeError:
+        nodes = {}
 
-    if usb_bus:
-        nodes = list_usb_capture_nodes()
-        if usb_bus in nodes:
-            return nodes[usb_bus], f"usb_bus {usb_bus} -> /dev/video{nodes[usb_bus]}"
+    if usb_bus and usb_bus in nodes:
+        index = nodes[usb_bus]
+        if index in occupied:
+            raise RuntimeError(
+                f"USB camera bus={usb_bus} mapped to /dev/video{index} "
+                "already used by another camera; not stealing it"
+            )
+        return index, f"usb_bus {usb_bus} -> /dev/video{index}"
 
     if configured:
         index = parse_video_index(configured)
-        probe = cv2.VideoCapture(index, cv2.CAP_V4L2)
-        if probe.isOpened():
-            probe.release()
+        owner_bus = next(
+            (bus for bus, idx in nodes.items() if idx == index),
+            None,
+        )
+        foreign = bool(usb_bus and owner_bus and owner_bus != usb_bus)
+        if index not in occupied and not foreign:
             return index, f"configured {configured}"
-        probe.release()
 
     if usb_bus:
-        nodes = list_usb_capture_nodes()
-        available = ", ".join(f"{bus}=/dev/video{idx}" for bus, idx in sorted(nodes.items()))
+        available = ", ".join(
+            f"{bus}=/dev/video{idx}" for bus, idx in sorted(nodes.items())
+        )
         raise RuntimeError(
             f"Cannot open USB camera (bus={usb_bus}, device={configured}). "
             f"Available USB capture nodes: {available or 'none'}"

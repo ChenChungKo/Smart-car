@@ -112,7 +112,7 @@ def calibrate_normal(objpoints, imgpoints, img_shape):
 
 def main():
     parser = argparse.ArgumentParser(description="Stable in-house intrinsic calibration.")
-    parser.add_argument("--camera", choices=["front", "left", "right", "rear"], required=True)
+    parser.add_argument("--camera", choices=["front", "left", "right", "rear", "gimbal"], required=True)
     parser.add_argument("--input-dir", default="")
     parser.add_argument("--output-dir", default="", help="Save K/D and summary here (default: input directory).")
     parser.add_argument("--board-cols", type=int, default=7)

@@ -15,7 +15,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from camera_devices import create_csi_still_configuration, resolve_usb_capture_index
+from camera_devices import create_csi_still_configuration, csi_array_to_bgr, resolve_usb_capture_index
 
 SERVER = Path(__file__).resolve().parent
 HARDWARE = SERVER / "camera_hardware.json"
@@ -128,8 +128,7 @@ def main():
     cv2.resizeWindow(win, 960, 360)
 
     while True:
-        rgb = csi.capture_array()
-        front = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        front = csi_array_to_bgr(csi.capture_array())
         ok, left = read_usb_full_fov(usb)
         if not ok:
             continue

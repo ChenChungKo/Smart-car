@@ -119,10 +119,10 @@ def capture_usb_best(
     return frame
 
 
-def capture_csi_front(path: Path, width: int, height: int, warmup_s: float) -> np.ndarray:
+def capture_csi(path: Path, width: int, height: int, warmup_s: float, camera_num: int, tag: str) -> np.ndarray:
     from picamera2 import Picamera2
 
-    cam = Picamera2(camera_num=1)
+    cam = Picamera2(camera_num=camera_num)
     cam.configure(create_csi_still_configuration(cam, width, height))
     cam.start()
     cam.set_controls({"AeEnable": True, "AwbEnable": True})
@@ -142,9 +142,13 @@ def capture_csi_front(path: Path, width: int, height: int, warmup_s: float) -> n
     cam.close()
     img = cv2.imread(str(path))
     if img is None:
-        raise RuntimeError(f"front: failed to read {path}")
-    print(f"front: CSI camera_num=1 mean={img.mean():.1f} -> {path}")
+        raise RuntimeError(f"{tag}: failed to read {path}")
+    print(f"{tag}: CSI camera_num={camera_num} mean={img.mean():.1f} -> {path}")
     return img
+
+
+def capture_csi_front(path: Path, width: int, height: int, warmup_s: float) -> np.ndarray:
+    return capture_csi(path, width, height, warmup_s, camera_num=1, tag="front")
 
 
 def stitch(labeled_dir: Path, output_dir: Path) -> Path:
@@ -203,8 +207,8 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=True)
     hw = json.loads(HARDWARE.read_text(encoding="utf-8"))
 
-    print("=== USB first (left, right, rear) ===")
-    for name in ("left", "right", "rear"):
+    print("=== USB first (left, right) ===")
+    for name in ("left", "right"):
         idx, how = resolve_usb_capture_index(hw[name])
         print(f"{name}: {how}")
         n_cand = args.candidates + 3 if name == "left" else args.candidates
@@ -219,7 +223,9 @@ def main() -> None:
             n_cand,
         )
 
-    print("=== CSI front last ===")
+    print("=== CSI rear then front ===")
+    capture_csi(out / "rear.jpg", args.width, args.height, args.csi_warmup, 0, "rear")
+    shutil.copy(out / "rear.jpg", out / "rear_csi_cam0.jpg")
     capture_csi_front(out / "front.jpg", args.width, args.height, args.csi_warmup)
     shutil.copy(out / "front.jpg", out / "front_csi_cam1.jpg")
 

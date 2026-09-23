@@ -7,7 +7,7 @@
       "D": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/front/camera_front_D.npy",
       "H": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/front/camera_front_H.npy",
       "image": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/front/front.jpg",
-      "source_image": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/camera_labeled_live_now/front_csi_cam1.jpg"
+      "source_image": "camera_test_images/front_csi_cam1.jpg"
     },
     "left": {
       "surround_name": "left",
@@ -15,7 +15,7 @@
       "D": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/left/camera_left_D.npy",
       "H": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/left/camera_left_H.npy",
       "image": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/left/left.jpg",
-      "source_image": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/camera_labeled_live_now/left.jpg"
+      "source_image": "camera_test_images/left_usb_video0.jpg"
     },
     "right": {
       "surround_name": "right",
@@ -23,7 +23,7 @@
       "D": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/right/camera_right_D.npy",
       "H": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/right/camera_right_H.npy",
       "image": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/right/right.jpg",
-      "source_image": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/camera_labeled_live_now/right.jpg"
+      "source_image": "camera_test_images/right_usb_video10.jpg"
     },
     "rear": {
       "surround_name": "back",
@@ -31,7 +31,7 @@
       "D": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/back/camera_back_D.npy",
       "H": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/back/camera_back_H.npy",
       "image": "/home/pi/CameraCalibration-test/SurroundBirdEyeView/data/back/back.jpg",
-      "source_image": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/camera_labeled_live_now/rear.jpg"
+      "source_image": "camera_test_images/rear_csi_cam0.jpg"
     }
   }
 }

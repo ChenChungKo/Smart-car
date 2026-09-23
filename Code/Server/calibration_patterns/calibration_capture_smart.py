@@ -37,6 +37,8 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from calibration_capture import (  # noqa: E402
+    CAMERA_CHOICES,
+    csi_camera_num,
     detect_board_preview,
     load_hardware,
     next_index,
@@ -115,7 +117,7 @@ def draw_coverage_grid(frame, covered_bins, frame_w, frame_h, origin=(10, 40), c
 
 def main():
     parser = argparse.ArgumentParser(description="Guided diverse-pose chessboard capture (manual save).")
-    parser.add_argument("--camera", choices=["front", "left", "right", "rear"], required=True)
+    parser.add_argument("--camera", choices=CAMERA_CHOICES, required=True)
     parser.add_argument("--output-dir", default="")
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=480)
@@ -151,7 +153,8 @@ def main():
             capture.release()
 
     elif camera["interface"] == "csi":
-        camera_num = 1 if args.camera == "front" else 0
+        camera_num = csi_camera_num(args.camera, camera)
+        print(f"CSI camera_num={camera_num}")
         csi = open_csi(camera_num, args.width, args.height, args.warmup, args.warmup_frames)
 
         def read_frame():
