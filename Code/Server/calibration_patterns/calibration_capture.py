@@ -16,7 +16,11 @@ HARDWARE = SERVER / "camera_hardware.json"
 DEFAULT_OUTPUT = ROOT / "captures"
 
 sys.path.insert(0, str(SERVER))
-from camera_devices import resolve_usb_capture_index, create_csi_still_configuration
+from camera_devices import (
+    create_csi_still_configuration,
+    csi_array_to_bgr,
+    resolve_usb_capture_index,
+)
 
 
 def load_hardware():
@@ -28,6 +32,16 @@ def parse_video_index(device_text):
     if "/dev/video" in device_text:
         return int(device_text.rsplit("video", 1)[1])
     raise ValueError(f"Unsupported USB device string: {device_text}")
+
+
+CAMERA_CHOICES = ["front", "left", "right", "rear", "gimbal"]
+
+
+def csi_camera_num(camera_name, camera_entry):
+    device = str(camera_entry.get("device", ""))
+    if "camera_num=" in device:
+        return int(device.split("camera_num=", 1)[1].split()[0].rstrip(",)"))
+    return 1 if camera_name == "front" else 0
 
 
 def open_usb(device_index, width, height, warmup, warmup_frames):
@@ -61,7 +75,7 @@ def open_csi(camera_num, width, height, warmup, warmup_frames):
 
 
 def read_csi(camera):
-    return True, cv2.cvtColor(camera.capture_array(), cv2.COLOR_RGB2BGR)
+    return True, csi_array_to_bgr(camera.capture_array())
 
 
 def detect_board(gray, board_size):
@@ -440,7 +454,7 @@ def main():
     parser = argparse.ArgumentParser(description="Capture chessboard images from one camera.")
     parser.add_argument(
         "--camera",
-        choices=["front", "left", "right", "rear"],
+        choices=CAMERA_CHOICES,
         default="left",
         help="Which camera to test first. Default: left USB.",
     )
@@ -488,7 +502,8 @@ def main():
             capture.release()
 
     elif camera["interface"] == "csi":
-        camera_num = 1 if args.camera == "front" else 0
+        camera_num = csi_camera_num(args.camera, camera)
+        print(f"CSI camera_num={camera_num}")
         csi = open_csi(camera_num, args.width, args.height, args.warmup, args.warmup_frames)
 
         def read_frame():

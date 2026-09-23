@@ -21,7 +21,7 @@ CAMERAS = (
     ("front", "front", "front_csi_cam1.jpg"),
     ("left", "left", "left_usb_video0.jpg"),
     ("right", "right", "right_usb_video10.jpg"),
-    ("rear", "back", "rear_usb_video37.jpg"),
+    ("rear", "back", "rear_csi_cam0.jpg"),
 )
 
 

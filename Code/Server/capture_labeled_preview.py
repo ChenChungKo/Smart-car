@@ -16,7 +16,11 @@ HARDWARE = SERVER / "camera_hardware.json"
 DEFAULT_OUTPUT = SERVER / "camera_labeled"
 
 sys.path.insert(0, str(SERVER))
-from camera_devices import resolve_usb_capture_index, create_csi_still_configuration
+from camera_devices import (
+    create_csi_still_configuration,
+    csi_array_to_bgr,
+    resolve_usb_capture_index,
+)
 
 
 def load_hardware():
@@ -214,8 +218,7 @@ def main():
         output_path = output_dir / f"{args.camera}_csi_cam{camera_num}.jpg"
 
         def read_frame():
-            rgb = csi.capture_array()
-            return True, cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+            return True, csi_array_to_bgr(csi.capture_array())
 
         def release():
             csi.close()

@@ -1,19 +1,44 @@
 {
   "camera": "left",
   "calibration_mode": "fisheye",
-  "image_count_total": 20,
-  "image_count_used": 20,
-  "rms_reprojection_error_px": 0.2422425700907058,
+  "image_count_total": 21,
+  "image_count_used": 21,
+  "image_files_used": [
+    "img_raw0.jpg",
+    "img_raw1.jpg",
+    "img_raw10.jpg",
+    "img_raw11.jpg",
+    "img_raw12.jpg",
+    "img_raw13.jpg",
+    "img_raw14.jpg",
+    "img_raw15.jpg",
+    "img_raw16.jpg",
+    "img_raw17.jpg",
+    "img_raw18.jpg",
+    "img_raw19.jpg",
+    "img_raw2.jpg",
+    "img_raw20.jpg",
+    "img_raw3.jpg",
+    "img_raw4.jpg",
+    "img_raw5.jpg",
+    "img_raw6.jpg",
+    "img_raw7.jpg",
+    "img_raw8.jpg",
+    "img_raw9.jpg"
+  ],
+  "rejected_views": [],
+  "max_view_rms_px": 0.75,
+  "rms_reprojection_error_px": 0.3706054031438859,
   "K": [
     [
-      361.0078275645968,
+      359.7097914960197,
       0.0,
-      323.07282559869753
+      325.0790683884992
     ],
     [
       0.0,
-      480.7894948921182,
-      230.65751824006585
+      479.811401924418,
+      236.41237427733708
     ],
     [
       0.0,
@@ -22,8 +47,8 @@
     ]
   ],
   "D": [
-    -0.10715313397518729,
-    -0.002146469618405897,
+    -0.11087105536760757,
+    -0.002739271090893408,
     0.0,
     0.0
   ],

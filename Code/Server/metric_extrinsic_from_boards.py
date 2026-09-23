@@ -25,22 +25,12 @@ DEFAULT_OUTPUT = CALIB / "bev_extrinsic_metric_auto"
 CAMERA_ORDER = ("front", "left", "right", "rear")
 SURROUND_NAMES = {"front": "front", "left": "left", "right": "right", "rear": "back"}
 
-# Checkerboard corner order is ambiguous under 180° rotation; reprojection error
-# alone can accept an upside-down mapping. Apply fixes about each *board*
-# centroid in BEV after the numeric fit (not the car center).
-# Each value is a list of (kind, angle_deg) applied left-to-right.
-# rotate angle: visually CCW degrees (+Y down); clockwise 90 => -90.
-#
-# RIGHT CAMERA — DO NOT DROP flip_v WITHOUT RE-CHECKING:
-#   2026-08-06: with only flip_h, green tape at physical right-*rear* wheel
-#   appeared at right-*front* in surround (front/rear inverted). Adding flip_v
-#   about the right board BEV centroid fixes it; left/right floor seam dy ≈ 16px.
-#   Do not re-pivot that flip about the car center unless re-verified visually.
-# See also Code/Server/BEV_LIVE_CAPTURE.md §4.
+# CSI front/rear still need a BEV rotation when a homography exists. USB
+# left/right are disambiguated by side_orientation_ok (car-at-bottom of the
+# USB frame, image-right=front on the left cam / image-left=front on the right).
 MANUAL_ORIENTATION_FIX = {
     "front": [("rotate", 180.0)],
-    "right": [("flip_h", 0.0), ("flip_v", 0.0)],
-    "rear": [("flip_h", 0.0), ("rotate", -90.0)],  # mirror then clockwise 90
+    "rear": [("flip_h", 0.0), ("rotate", -90.0)],
 }
 
 
@@ -164,12 +154,42 @@ def mm_to_bev(points_mm, map_w, map_h, bev_w, bev_h, px_per_mm=None):
     return out
 
 
-def best_h(src_undist, dst_bev, board_size=(7, 6)):
+def side_orientation_ok(camera, homography, src_corners, car_uv):
+    """USB side cameras: image bottom is the car; front of the car is
+    image-right on the left camera and image-left on the right camera.
+    """
+    if camera not in ("left", "right"):
+        return True
+    center = src_corners.reshape(-1, 2).mean(axis=0)
+    probes = {
+        "below": center + np.array([0.0, 50.0]),
+        "above": center + np.array([0.0, -50.0]),
+        "left": center + np.array([-50.0, 0.0]),
+        "right": center + np.array([50.0, 0.0]),
+    }
+    mapped = {}
+    for key, point in probes.items():
+        mapped[key] = cv2.perspectiveTransform(
+            point.reshape(1, 1, 2).astype(np.float32), homography
+        )[0, 0]
+    car = np.asarray(car_uv, dtype=np.float32)
+    dist_below = float(np.linalg.norm(mapped["below"] - car))
+    dist_above = float(np.linalg.norm(mapped["above"] - car))
+    if dist_below >= dist_above:
+        return False
+    if camera == "left":
+        return mapped["right"][1] < mapped["left"][1]
+    return mapped["left"][1] < mapped["right"][1]
+
+
+def best_h(src_undist, dst_bev, board_size=(7, 6), camera="front", car_uv=None):
     best = None
     for src_id, src in enumerate(corner_orders(src_undist, board_size)):
         for dst_id, dst in enumerate(corner_orders(dst_bev, board_size)):
             H, mask = cv2.findHomography(src, dst, cv2.RANSAC, 3.0)
             if H is None:
+                continue
+            if car_uv is not None and not side_orientation_ok(camera, H, src_undist, car_uv):
                 continue
             proj = cv2.perspectiveTransform(src, H).reshape(-1, 2)
             err = float(np.linalg.norm(proj - dst.reshape(-1, 2), axis=1).mean())
@@ -284,7 +304,7 @@ def main():
         dst_bev_pts = dst_bev.reshape(-1, 1, 2).astype(np.float32)
         src_pts = src_undist.reshape(-1, 1, 2).astype(np.float32)
 
-        best = best_h(src_pts, dst_bev_pts, board_size)
+        best = best_h(src_pts, dst_bev_pts, board_size, camera, car_center_bev)
         if best is None:
             print(f"{camera}: FAILED — no homography")
             summary["cameras"][camera] = {"ok": False, "reason": "no_H"}

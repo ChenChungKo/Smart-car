@@ -1,19 +1,49 @@
 {
   "camera": "rear",
   "calibration_mode": "fisheye",
-  "image_count_total": 18,
-  "image_count_used": 18,
-  "rms_reprojection_error_px": 0.2656222816785562,
+  "image_count_total": 22,
+  "image_count_used": 21,
+  "image_files_used": [
+    "img_raw0.jpg",
+    "img_raw1.jpg",
+    "img_raw10.jpg",
+    "img_raw11.jpg",
+    "img_raw12.jpg",
+    "img_raw13.jpg",
+    "img_raw14.jpg",
+    "img_raw15.jpg",
+    "img_raw16.jpg",
+    "img_raw17.jpg",
+    "img_raw18.jpg",
+    "img_raw19.jpg",
+    "img_raw2.jpg",
+    "img_raw20.jpg",
+    "img_raw21.jpg",
+    "img_raw3.jpg",
+    "img_raw4.jpg",
+    "img_raw5.jpg",
+    "img_raw6.jpg",
+    "img_raw7.jpg",
+    "img_raw9.jpg"
+  ],
+  "rejected_views": [
+    {
+      "file": "img_raw8.jpg",
+      "rms_reprojection_error_px": 1.0721427067142166
+    }
+  ],
+  "max_view_rms_px": 0.75,
+  "rms_reprojection_error_px": 0.2251961063853057,
   "K": [
     [
-      363.0009055572994,
+      156.4094483088624,
       0.0,
-      320.4265060011908
+      317.0489543317237
     ],
     [
       0.0,
-      484.2499308302528,
-      237.47111551583313
+      156.37922391616237,
+      238.33265236202809
     ],
     [
       0.0,
@@ -22,8 +52,8 @@
     ]
   ],
   "D": [
-    -0.11206685966419573,
-    -0.004329992965528447,
+    -0.012206811899461321,
+    -0.0027799028171865145,
     0.0,
     0.0
   ],

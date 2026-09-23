@@ -24,43 +24,18 @@
   },
   "cameras": {
     "front": {
-      "ok": true,
-      "surround_name": "front",
-      "source_image": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/camera_labeled/front_csi_cam1.jpg",
-      "H_file": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/calibration_patterns/bev_extrinsic_metric_auto/camera_front_H.npy",
-      "reproj_err_px": 1.4340626001358032,
-      "inliers": 37,
-      "src_order_id": 2,
-      "dst_order_id": 0,
-      "source_kind": "raw_mapped",
-      "world_mm_sample": [
-        [
-          197.0,
-          219.0
-        ],
-        [
-          197.0,
-          357.0
-        ],
-        [
-          82.0,
-          219.0
-        ],
-        [
-          82.0,
-          357.0
-        ]
-      ]
+      "ok": false,
+      "reason": "no_board"
     },
     "left": {
       "ok": true,
       "surround_name": "left",
-      "source_image": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/camera_labeled/left_usb_video38.jpg",
+      "source_image": "camera_labeled_live_now/left.jpg",
       "H_file": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/calibration_patterns/bev_extrinsic_metric_auto/camera_left_H.npy",
-      "reproj_err_px": 0.4689280688762665,
-      "inliers": 41,
-      "src_order_id": 1,
-      "dst_order_id": 1,
+      "reproj_err_px": 0.6401388049125671,
+      "inliers": 40,
+      "src_order_id": 2,
+      "dst_order_id": 2,
       "source_kind": "undistorted",
       "world_mm_sample": [
         [
@@ -84,12 +59,12 @@
     "right": {
       "ok": true,
       "surround_name": "right",
-      "source_image": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/camera_labeled/right_usb_video18.jpg",
+      "source_image": "camera_labeled_live_now/right.jpg",
       "H_file": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/calibration_patterns/bev_extrinsic_metric_auto/camera_right_H.npy",
-      "reproj_err_px": 0.46389421820640564,
-      "inliers": 41,
-      "src_order_id": 4,
-      "dst_order_id": 6,
+      "reproj_err_px": 0.4869414269924164,
+      "inliers": 40,
+      "src_order_id": 0,
+      "dst_order_id": 2,
       "source_kind": "undistorted",
       "world_mm_sample": [
         [
@@ -111,33 +86,8 @@
       ]
     },
     "rear": {
-      "ok": true,
-      "surround_name": "back",
-      "source_image": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/camera_labeled/rear_usb_video0.jpg",
-      "H_file": "/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/calibration_patterns/bev_extrinsic_metric_auto/camera_back_H.npy",
-      "reproj_err_px": 0.9027681946754456,
-      "inliers": 39,
-      "src_order_id": 4,
-      "dst_order_id": 7,
-      "source_kind": "undistorted",
-      "world_mm_sample": [
-        [
-          683.0,
-          219.0
-        ],
-        [
-          683.0,
-          357.0
-        ],
-        [
-          798.0,
-          219.0
-        ],
-        [
-          798.0,
-          357.0
-        ]
-      ]
+      "ok": false,
+      "reason": "no_board"
     }
   }
 }
