@@ -1,7 +1,11 @@
 ## Smart Car
 
 這個 repository 是基於 Freenove 4WD Smart Car Kit for Raspberry Pi 改裝後的個人測試版本。  
-目前重點是保存整台車的功能測試、續航測試、硬體校正參數，以及四相機幾何環景（IPM）校正結果，方便日後重新部署或維修時快速確認。
+目前重點包含：
+
+- 整車功能測試、續航測試、硬體校正參數
+- 四相機幾何環景（IPM）拼接
+- **場地內 ArUco 牆上標籤定位**，以及依航點停看走的路線跟隨
 
 詳細操作筆記請看：
 
@@ -305,6 +309,133 @@ Code/Server/bev_stitch.py
 Code/Server/camera_hardware.json
 ```
 
+## 場地 ArUco 定位與路線跟隨
+
+目標：在自建場地（目前內框約 `1.40 m × 1.40 m`）裡，用前後 CSI 魚眼鏡頭看牆上的 ArUco 標籤，算出車身中心的 `(x, y, yaw)`，再照航點停看走。
+
+**定位用相機：** 只用前後兩顆 CSI（`front = camera_num=1`、`rear = camera_num=0`）。左右 USB 相機不參與定位。
+
+**控制方式：** 不是邊走邊定位。`route_follow.py` 採用 stop-and-look：停下 → 等畫面穩定 → 用標籤定位 → 原地轉向 → 直走一小段（預設最多 0.35 m）→ 再停下。推車過程中即時視窗可能會抖，停下來後才是可靠結果。
+
+### 座標與地圖
+
+| 項目 | 說明 |
+|---|---|
+| 原點 | 左下角兩面牆**內側面**交點（左邊灰牆 × 下方藍牆） |
+| x / y | x 沿下方藍牆往右，y 沿左邊灰牆往上，單位公尺 |
+| 車身座標 | 原點在車身中心地面；x 朝車頭，y 朝車左，z 朝上 |
+| 標籤字典 | `DICT_4X4_50`，黑色方塊邊長 **10 cm** |
+| 標籤位置 | `Code/Server/arena_map.json`（目前 8 張，貼在 8 塊泡棉正中，中心離地 7.5 cm） |
+| 鏡頭外參 | `Code/Server/car_nav.json` 的 `camera_mounts`（前後鏡頭離車心約 ±11 cm、離地約 4 cm） |
+
+地圖裡的 `facing_deg` 是標籤正面朝場地內的方向；若標籤上下貼反，加 `"rotation_deg": 180`（目前 id 0、1）。標籤四角要用膠帶貼平，紙面翹起來會反光、解不出編號。
+
+航點路線也寫在 `arena_map.json` 的 `routes`：
+
+```text
+loop  四角來回： (0.35,0.35) → (1.05,0.35) → (1.05,1.05) → (0.35,1.05) → 起點
+line  橫向一線： (0.35,0.70) → (1.05,0.70)
+```
+
+之後放高台／斜坡／右下藍色方塊時，部分標籤會被擋，記得改貼位置並更新 `arena_map.json`。
+
+### 印標籤
+
+```bash
+cd /home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server
+python3 aruco_print.py --ids 0-7 --size-mm 100
+```
+
+輸出 PDF／PNG 在本機 `aruco_print/`（已列入 `.gitignore`，不進 Git）。列印後量黑色方塊是否剛好 10 cm；若不是，改 `arena_map.json` 的 `tag_size_m`。
+
+### 即時定位（不動馬達）
+
+```bash
+cd /home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server
+python3 aruco_localizer.py
+```
+
+視窗左邊是前後鏡頭（有偵測到的標籤會畫框），右邊是場地地圖與軌跡。按 `s` 存原始畫面到 `aruco_debug/`，`q` 離開。
+
+終端機會印類似：
+
+```text
+x=0.68 y=0.68 yaw=+0deg [f2,f3,r7,r6] rms 2.5px
+```
+
+`rms` 愈小愈好；超過約 6 px 會拒絕輸出，地圖停在上一次可靠位置（避免亂跳）。
+
+常用參數：
+
+```bash
+# 只量鏡頭到標籤的距離（不需要地圖）
+python3 aruco_localizer.py --range
+
+# 車放平、看得清楚至少 2 張標籤時，粗估俯角（會寫回 car_nav.json）
+# 注意：鏡頭高度/前後位置若不對，單點 --calibrate-pitch 會用錯誤俯角去湊，換位置就失敗。
+# 目前 car_nav.json 的 pitch/z/x 已用多位置解過，平常不要再跑這個覆蓋掉。
+python3 aruco_localizer.py --calibrate-pitch 20
+```
+
+定位演算法摘要：
+
+1. 魚眼原圖 + 中央拉直後的圖各偵測一次，合併結果（近處彎曲標籤較易解出）。
+2. 角點用 fisheye 內參還原成單位射線，多張標籤一起做平面 `(x, y, yaw)` 擬合。
+3. 離光軸太遠、或側視太斜的標籤會被丟掉；只剩一張且超過約 0.8 m 時不採用（避免遠處單標籤亂跳）。
+4. 保留彼此吻合最多的一組標籤，而不是只留「自己誤差最小」的那一張。
+
+### 路線跟隨
+
+預設是 dry-run（不轉馬達）。確認定位 OK 後再加 `--arm`。
+
+```bash
+# 先校正直走/轉彎速度（會動車，寫回 car_nav.json 的 motion）
+python3 route_follow.py --calibrate-motion --arm
+
+# 乾跑：只定位、印計畫，馬達不轉
+python3 route_follow.py --route loop
+
+# 實跑一圈
+python3 route_follow.py --route loop --arm
+
+# 反覆跑直到 Ctrl+C
+python3 route_follow.py --route loop --arm --repeat
+```
+
+安全層（會覆寫導航指令）：
+
+```text
+超音波 < 18 cm     → 硬停
+前紅外線           → 僅在超音波也夠近時才信
+前鏡頭走廊分數     → 近障分數高且超音波落在 creep 範圍才信
+電池電壓過低       → 中止
+```
+
+軌跡圖會寫到 `route_follow_debug/`。
+
+### 建議驗證順序
+
+1. `python3 aruco_print.py` → 貼標籤（四角貼平）→ 更新 `arena_map.json` 真實位置。
+2. `python3 aruco_localizer.py --range`，在 12 cm / 26 cm 量距離是否準。
+3. 車放場地中央，跑 `python3 aruco_localizer.py`，確認 `x≈0.70 y≈0.70`、`rms` 約 2–4 px。
+4. 用手推到 2–3 個用尺量過的位置，比對畫面座標（誤差目標約 3 cm 內）。
+5. `python3 route_follow.py --calibrate-motion --arm`。
+6. `python3 route_follow.py --route loop` 乾跑，再 `--arm`。
+
+### 相關檔案
+
+```text
+Code/Server/aruco_print.py          # 產生可列印標籤
+Code/Server/aruco_localizer.py      # 即時定位 / 俯角校正 / 測距
+Code/Server/route_follow.py         # 航點跟隨（stop-and-look）
+Code/Server/arena_map.json          # 場地尺寸、標籤位姿、航點
+Code/Server/car_nav.json            # 鏡頭外參、運動參數
+Code/Server/safe_surround_cruise.py # 安全感測（route_follow 會用到）
+Code/Server/vision_detector.py      # 前鏡頭走廊分數（route_follow 會用到）
+```
+
+除錯圖目錄（不進 Git）：`aruco_debug/`、`aruco_print/`、`route_follow_debug/`。
+
 ## 續航壓力測試
 
 一般續航測試：
@@ -380,6 +511,10 @@ Code/Server/camera_hardware.json
 Code/Server/camera_devices.py
 Code/Server/capture_live_surround.py
 Code/Server/calibration_patterns/bev_extrinsic_metric_auto/
+Code/Server/aruco_localizer.py
+Code/Server/route_follow.py
+Code/Server/arena_map.json
+Code/Server/car_nav.json
 ```
 
 ## 原始專案來源

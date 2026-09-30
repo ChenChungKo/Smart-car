@@ -1,0 +1,5 @@
+# Local vision-cruise environment and model weights (large).
+.venv/
+models/*.onnx
+models/*.pt
+vision_cruise_debug/

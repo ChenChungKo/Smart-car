@@ -1,0 +1,37 @@
+{
+  "notes": [
+    "車身座標：原點在車身中心的地面，x 朝車頭，y 朝車左，z 朝上。",
+    "camera_mounts 的 pitch_deg 是鏡頭往下俯的角度；yaw_deg 180 代表朝車尾。",
+    "x_m / z_m / pitch_deg 是用場地中央與右上角兩個位置的所有標籤一起解出來的（鏡頭離地約 4 cm）。",
+    "單點 --calibrate-pitch 只調 pitch_deg；高度或前後位置錯時它會用錯誤的俯角去湊，換位置就對不上。",
+    "max_off_axis_deg：離光軸超過這角度的標籤不參與定位，除非只看得到它們。",
+    "motion 的速度由 route_follow.py --calibrate-motion 用標籤實測後寫回。calibrated=false 代表還是估計值。"
+  ],
+  "camera_mounts": {
+    "front": {
+      "camera_num": 1,
+      "x_m": 0.112,
+      "y_m": 0.0,
+      "z_m": 0.037,
+      "yaw_deg": 0.0,
+      "pitch_deg": 14.4
+    },
+    "rear": {
+      "camera_num": 0,
+      "x_m": -0.114,
+      "y_m": 0.0,
+      "z_m": 0.040,
+      "yaw_deg": 180.0,
+      "pitch_deg": 13.1
+    }
+  },
+  "max_off_axis_deg": 75.0,
+  "motion": {
+    "forward_pwm": 1000,
+    "forward_mps": 0.15,
+    "turn_pwm": 900,
+    "turn_left_dps": 37.5,
+    "turn_right_dps": 42.9,
+    "calibrated": false
+  }
+}
