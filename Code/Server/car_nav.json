@@ -20,7 +20,7 @@
       "camera_num": 0,
       "x_m": -0.114,
       "y_m": 0.0,
-      "z_m": 0.040,
+      "z_m": 0.04,
       "yaw_deg": 180.0,
       "pitch_deg": 13.1
     }
@@ -28,10 +28,13 @@
   "max_off_axis_deg": 75.0,
   "motion": {
     "forward_pwm": 1000,
-    "forward_mps": 0.15,
+    "forward_mps": 0.1682,
     "turn_pwm": 900,
-    "turn_left_dps": 37.5,
-    "turn_right_dps": 42.9,
-    "calibrated": false
+    "turn_left_dps": 64.03,
+    "turn_right_dps": 64.78,
+    "strafe_pwm": 1200,
+    "strafe_mps": 0.136,
+    "drift_left_deg_per_m": 7.0,
+    "calibrated": true
   }
 }

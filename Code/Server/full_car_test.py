@@ -14,9 +14,59 @@ from servo import Servo
 from ultrasonic import Ultrasonic
 
 
+def estimate_battery_percent(voltage):
+    voltage_table = [
+        (8.40, 100),
+        (8.20, 90),
+        (8.00, 80),
+        (7.80, 70),
+        (7.60, 60),
+        (7.40, 50),
+        (7.20, 35),
+        (7.00, 20),
+        (6.80, 10),
+        (6.60, 5),
+        (6.40, 0),
+    ]
+    if voltage >= voltage_table[0][0]:
+        return 100
+    if voltage <= voltage_table[-1][0]:
+        return 0
+    for (high_voltage, high_percent), (low_voltage, low_percent) in zip(voltage_table, voltage_table[1:]):
+        if low_voltage <= voltage <= high_voltage:
+            ratio = (voltage - low_voltage) / (high_voltage - low_voltage)
+            return round(low_percent + ratio * (high_percent - low_percent))
+    return 0
+
+
+MENU_ITEMS = [
+    ("system", "全車系統測試"),
+    ("basic-drive", "基本輪組移動"),
+    ("mecanum", "麥克納姆移動"),
+    ("servo", "伺服掃描"),
+    ("ultrasonic", "超音波測距"),
+    ("infrared", "紅外循線"),
+    ("obstacle", "紅外避障"),
+    ("adc", "ADC 光線／電池"),
+    ("sensors", "全部感測器"),
+    ("buzzer", "蜂鳴器"),
+    ("speaker", "外接喇叭"),
+    ("microphone", "外接麥克風"),
+    ("audio", "麥克風＋喇叭"),
+    ("led", "LED 燈條"),
+    ("camera", "單相機拍照"),
+    ("cameras", "全部相機拍照"),
+    ("cameras-labeled", "標註四向相機"),
+    ("plane-map", "四向平面圖拼接"),
+    ("all", "執行全部測試"),
+]
+
+
 class FullCarTester:
-    def __init__(self, args):
+    def __init__(self, args, confirm_fn=None):
         self.args = args
+        self.confirm_fn = confirm_fn
+        self.was_skipped = False
         self.motor = None
         self.servo = None
         self.sonic = None
@@ -69,8 +119,16 @@ class FullCarTester:
     def confirm(self, message):
         if self.args.yes:
             return True
+        if self.confirm_fn is not None:
+            ok = bool(self.confirm_fn(message))
+            if not ok:
+                self.was_skipped = True
+            return ok
         answer = input(f"{message} [y/N]: ").strip().lower()
-        return answer in ("y", "yes")
+        ok = answer in ("y", "yes")
+        if not ok:
+            self.was_skipped = True
+        return ok
 
     def countdown(self, seconds=3):
         for value in range(seconds, 0, -1):
@@ -186,28 +244,7 @@ class FullCarTester:
                 sensor.close()
 
     def estimate_battery_percent(self, voltage):
-        voltage_table = [
-            (8.40, 100),
-            (8.20, 90),
-            (8.00, 80),
-            (7.80, 70),
-            (7.60, 60),
-            (7.40, 50),
-            (7.20, 35),
-            (7.00, 20),
-            (6.80, 10),
-            (6.60, 5),
-            (6.40, 0),
-        ]
-        if voltage >= voltage_table[0][0]:
-            return 100
-        if voltage <= voltage_table[-1][0]:
-            return 0
-        for (high_voltage, high_percent), (low_voltage, low_percent) in zip(voltage_table, voltage_table[1:]):
-            if low_voltage <= voltage <= high_voltage:
-                ratio = (voltage - low_voltage) / (high_voltage - low_voltage)
-                return round(low_percent + ratio * (high_percent - low_percent))
-        return 0
+        return estimate_battery_percent(voltage)
 
     def test_adc(self):
         adc = self.get_adc()
@@ -326,6 +363,22 @@ class FullCarTester:
         self.test_speaker()
         self.test_microphone()
 
+    def turn_off_leds(self):
+        """Force all LED pixels off (call after LED test / on cleanup)."""
+        led = self.led
+        if led is None or not getattr(led, "is_support_led_function", False):
+            return
+        try:
+            # WS2812 sometimes needs a repeated zero frame to latch off.
+            for _ in range(3):
+                led.strip.set_all_led_color(0, 0, 0)
+                if hasattr(led.strip, "show"):
+                    led.strip.show()
+                time.sleep(0.05)
+            print("LEDs turned off.")
+        except Exception as exc:
+            print(f"Failed to turn off LEDs: {exc}")
+
     def test_led(self):
         led = self.get_led()
         if not getattr(led, "is_support_led_function", False):
@@ -336,51 +389,56 @@ class FullCarTester:
             f"Pi_Version={getattr(led, 'pi_version', None)}, "
             f"driver={type(getattr(led, 'strip', None)).__name__}"
         )
-        if hasattr(led.strip, "check_spi_state"):
-            print(f"SPI LED init state: {led.strip.check_spi_state()}")
-            led.strip.spi_gpio_info()
-        elif hasattr(led.strip, "check_rpi_ws281x_state"):
-            print(f"RPI WS281x init state: {led.strip.check_rpi_ws281x_state()}")
-        print("Testing all LEDs red/green/blue/white...")
-        for label, color in [
-            ("red", (255, 0, 0)),
-            ("green", (0, 255, 0)),
-            ("blue", (0, 0, 255)),
-            ("white", (255, 255, 255)),
-        ]:
-            print(f"  all {label}")
-            led.strip.set_all_led_color(*color)
-            time.sleep(1)
-        led.colorBlink(0)
-        print("Testing individual LEDs...")
-        colors = [
-            (0x01, 255, 0, 0),
-            (0x02, 255, 125, 0),
-            (0x04, 255, 255, 0),
-            (0x08, 0, 255, 0),
-            (0x10, 0, 255, 255),
-            (0x20, 0, 0, 255),
-            (0x40, 128, 0, 128),
-            (0x80, 255, 255, 255),
-        ]
-        for index, red, green, blue in colors:
-            led.ledIndex(index, red, green, blue)
-            time.sleep(0.2)
-        time.sleep(1)
-        print("Testing LED animations...")
-        animation_steps = [
-            ("following", led.following, 2.0),
-            ("colorBlink", lambda: led.colorBlink(1), 2.0),
-            ("rainbowbreathing", led.rainbowbreathing, 2.0),
-            ("rainbowCycle", led.rainbowCycle, 2.0),
-        ]
-        for label, callback, duration in animation_steps:
-            print(f"  {label}")
-            end_time = time.time() + duration
-            while time.time() < end_time:
-                callback()
-                time.sleep(0.01)
-        led.colorBlink(0)
+        try:
+            if hasattr(led.strip, "check_spi_state"):
+                print(f"SPI LED init state: {led.strip.check_spi_state()}")
+                led.strip.spi_gpio_info()
+            elif hasattr(led.strip, "check_rpi_ws281x_state"):
+                print(f"RPI WS281x init state: {led.strip.check_rpi_ws281x_state()}")
+            print("Testing all LEDs red/green/blue/white...")
+            for label, color in [
+                ("red", (255, 0, 0)),
+                ("green", (0, 255, 0)),
+                ("blue", (0, 0, 255)),
+                ("white", (255, 255, 255)),
+            ]:
+                print(f"  all {label}")
+                led.strip.set_all_led_color(*color)
+                time.sleep(1)
+            self.turn_off_leds()
+            print("Testing individual LEDs (one at a time)...")
+            colors = [
+                (0x01, 255, 0, 0, "red"),
+                (0x02, 255, 125, 0, "orange"),
+                (0x04, 255, 255, 0, "yellow"),
+                (0x08, 0, 255, 0, "green"),
+                (0x10, 0, 255, 255, "cyan"),
+                (0x20, 0, 0, 255, "blue"),
+                (0x40, 180, 0, 255, "purple"),
+                (0x80, 255, 255, 255, "white"),
+            ]
+            for index, red, green, blue, name in colors:
+                # Clear others first — old ledIndex only sets bits, never turns neighbors off.
+                led.strip.set_all_led_color(0, 0, 0)
+                print(f"  LED mask 0x{index:02X} -> {name} RGB({red},{green},{blue})")
+                led.ledIndex(index, red, green, blue)
+                time.sleep(0.45)
+            time.sleep(0.5)
+            print("Testing LED animations...")
+            animation_steps = [
+                ("following", led.following, 2.0),
+                ("colorBlink", lambda: led.colorBlink(1), 2.0),
+                ("rainbowbreathing", led.rainbowbreathing, 2.0),
+                ("rainbowCycle", led.rainbowCycle, 2.0),
+            ]
+            for label, callback, duration in animation_steps:
+                print(f"  {label}")
+                end_time = time.time() + duration
+                while time.time() < end_time:
+                    callback()
+                    time.sleep(0.01)
+        finally:
+            self.turn_off_leds()
 
     def test_camera(self):
         output_path = Path(self.args.camera_file)
@@ -759,7 +817,7 @@ class FullCarTester:
             print(f"Motor cleanup failed: {exc}")
         try:
             if self.led is not None:
-                self.led.colorBlink(0)
+                self.turn_off_leds()
         except Exception as exc:
             print(f"LED cleanup failed: {exc}")
         try:
@@ -824,37 +882,16 @@ class FullCarTester:
         tests[name]()
 
     def menu(self):
-        menu_items = [
-            ("system", "Full car system test"),
-            ("basic-drive", "Basic wheel movement"),
-            ("mecanum", "Mecanum movement"),
-            ("servo", "Servo sweep"),
-            ("ultrasonic", "Ultrasonic distance"),
-            ("infrared", "Infrared line sensors"),
-            ("obstacle", "Extra infrared obstacle sensors"),
-            ("adc", "ADC light and battery"),
-            ("sensors", "All sensors"),
-            ("buzzer", "Buzzer"),
-            ("speaker", "External speaker"),
-            ("microphone", "External microphone"),
-            ("audio", "Microphone and speaker"),
-            ("led", "LED pixels"),
-            ("camera", "Camera capture"),
-            ("cameras", "All camera captures"),
-            ("cameras-labeled", "Labeled 4-camera capture (front/left/right/rear)"),
-            ("plane-map", "Capture 4 cameras and stitch plane map"),
-            ("all", "Run every test"),
-        ]
         while True:
             print("\nFull car test menu")
-            for index, (_, label) in enumerate(menu_items, start=1):
+            for index, (_, label) in enumerate(MENU_ITEMS, start=1):
                 print(f"  {index}. {label}")
             print("  q. Quit")
             choice = input("Select a test: ").strip().lower()
             if choice in ("q", "quit", "exit"):
                 return
             try:
-                selected = menu_items[int(choice) - 1][0]
+                selected = MENU_ITEMS[int(choice) - 1][0]
             except (ValueError, IndexError):
                 print("Invalid choice.")
                 continue
@@ -912,7 +949,7 @@ def build_parser():
     parser.add_argument("--picamera-count", type=int, default=2, help="Number of Picamera indexes to test.")
     parser.add_argument("--usb-camera-count", type=int, default=3, help="Number of USB camera indexes to test.")
     parser.add_argument("--usb-camera-start", type=int, default=0, help="First /dev/video index for USB camera tests.")
-    parser.add_argument("--usb-camera-indexes", default="0,10,37", help="Comma-separated /dev/video indexes for USB camera tests, for example 0,10,37.")
+    parser.add_argument("--usb-camera-indexes", default="0,18,37", help="Comma-separated /dev/video indexes for USB camera tests, for example 0,18,37.")
     parser.add_argument("--csi-camera-num", type=int, default=1, help="CSI Picamera index for front camera (labeled capture).")
     parser.add_argument(
         "--labeled-camera",

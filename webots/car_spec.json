@@ -1,0 +1,56 @@
+{
+  "name": "Freenove4WD",
+  "notes": "Metres and radians. Insert Freenove4WD.proto into the foam-wall world; do not rebuild the arena here.",
+  "body": {
+    "length_m": 0.29,
+    "width_m": 0.18,
+    "mass_kg": 1.5,
+    "gear_ratio": "1:120",
+    "pwm_stall": 900,
+    "pwm_max": 4095,
+    "turn_90_s_left_at_pwm_900": 2.4,
+    "turn_90_s_right_at_pwm_900": 2.1
+  },
+  "wheels": {
+    "diameter_m": 0.065,
+    "width_m": 0.022,
+    "wheelbase_m": 0.16,
+    "track_m": 0.15,
+    "max_velocity_rad_s": 8.0,
+    "names": ["motor_fl", "motor_rl", "motor_fr", "motor_rr"],
+    "pwm_order": ["duty1_left_front", "duty2_left_rear", "duty3_right_front", "duty4_right_rear"]
+  },
+  "cameras": {
+    "cam_front": {
+      "role": "CSI camera_num=1",
+      "height_m": 0.12,
+      "ahead_of_ultrasonic_m": 0.035,
+      "pitch_down_deg": 16.0,
+      "width": 160,
+      "height": 120,
+      "projection": "spherical",
+      "field_of_view_rad": 3.14159
+    },
+    "cam_left": {"role": "USB left", "yaw_deg": 90},
+    "cam_right": {"role": "USB right", "yaw_deg": -90},
+    "cam_rear": {"role": "CSI camera_num=0", "yaw_deg": 180},
+    "cam_gimbal": {"role": "USB on SG90", "with": "sonic"}
+  },
+  "gimbal": {
+    "pan_home_deg": 76,
+    "tilt_home_deg": 90,
+    "sim_home_rad": 0,
+    "max_pan_offset_deg": 50
+  },
+  "ultrasonic": {
+    "name": "sonic",
+    "type": "sonar",
+    "max_m": 3.0,
+    "trigger_gpio": 27,
+    "echo_gpio": 22
+  },
+  "ir": {
+    "active_low": true,
+    "names": ["ir_front_left", "ir_front", "ir_front_right", "ir_left", "ir_right", "ir_rear"]
+  }
+}

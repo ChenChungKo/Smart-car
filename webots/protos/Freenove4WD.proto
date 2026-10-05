@@ -1,0 +1,462 @@
+#VRML_SIM R2023b utf8
+# Freenove 4WD (this repo's measured layout). Drop into an existing foam-wall world:
+#   EXTERNPROTO "../protos/Freenove4WD.proto"
+#   Freenove4WD { translation 0 0.0325 0 }
+# Robot frame: X forward, Y up, Z right. Numbers from car_spec.json.
+
+PROTO Freenove4WD [
+  field SFVec3f    translation      0 0.0325 0
+  field SFRotation rotation         0 1 0 0
+  field SFString   name             "Freenove4WD"
+  field SFString   controller       "surround_cruise"
+  field MFString   controllerArgs   []
+  field SFString   customData       ""
+  field SFBool     supervisor       FALSE
+  field SFBool     synchronization  TRUE
+]
+{
+  Robot {
+    translation IS translation
+    rotation IS rotation
+    name IS name
+    controller IS controller
+    controllerArgs IS controllerArgs
+    customData IS customData
+    supervisor IS supervisor
+    synchronization IS synchronization
+    children [
+      DEF BODY Transform {
+        translation 0 0.055 0
+        children [
+          Shape {
+            appearance PBRAppearance {
+              baseColor 0.16 0.17 0.2
+              roughness 0.55
+              metalness 0.05
+            }
+            geometry Box {
+              size 0.28 0.07 0.16
+            }
+          }
+        ]
+      }
+      DEF HOOD Transform {
+        translation 0.11 0.095 0
+        children [
+          Shape {
+            appearance PBRAppearance {
+              baseColor 0.22 0.24 0.28
+              roughness 0.5
+              metalness 0
+            }
+            geometry Box {
+              size 0.06 0.02 0.12
+            }
+          }
+        ]
+      }
+
+      # Front CSI (camera_num=1): 12 cm high, 16° down, 3.5 cm ahead of ultrasonic.
+      Transform {
+        translation 0.155 0.0875 0
+        rotation 0 1 0 -1.5708
+        children [
+          Transform {
+            rotation 1 0 0 -0.2793
+            children [
+              Camera {
+                name "cam_front"
+                width 160
+                height 120
+                fieldOfView 3.14159
+                projection "spherical"
+                near 0.02
+              }
+            ]
+          }
+        ]
+      }
+      Transform {
+        translation -0.145 0.08 0
+        rotation 0 1 0 1.5708
+        children [
+          Camera {
+            name "cam_rear"
+            width 80
+            height 60
+            fieldOfView 3.14159
+            projection "spherical"
+            near 0.02
+          }
+        ]
+      }
+      Transform {
+        translation 0 0.07 -0.09
+        children [
+          Camera {
+            name "cam_left"
+            width 80
+            height 60
+            fieldOfView 3.14159
+            projection "spherical"
+            near 0.02
+          }
+        ]
+      }
+      Transform {
+        translation 0 0.07 0.09
+        rotation 0 1 0 3.14159
+        children [
+          Camera {
+            name "cam_right"
+            width 80
+            height 60
+            fieldOfView 3.14159
+            projection "spherical"
+            near 0.02
+          }
+        ]
+      }
+
+      Transform {
+        translation 0.14 0.05 0
+        rotation 0 1 0 -1.5708
+        children [
+          DistanceSensor {
+            name "ir_front"
+            type "generic"
+            lookupTable [ 0 0 0, 0.16 1 0, 0.20 0 0 ]
+            numberOfRays 2
+            aperture 0.35
+          }
+        ]
+      }
+      Transform {
+        translation 0.12 0.05 -0.07
+        rotation 0 1 0 -0.9
+        children [
+          DistanceSensor {
+            name "ir_front_left"
+            type "generic"
+            lookupTable [ 0 0 0, 0.16 1 0, 0.20 0 0 ]
+            numberOfRays 1
+          }
+        ]
+      }
+      Transform {
+        translation 0.12 0.05 0.07
+        rotation 0 1 0 -2.24
+        children [
+          DistanceSensor {
+            name "ir_front_right"
+            type "generic"
+            lookupTable [ 0 0 0, 0.16 1 0, 0.20 0 0 ]
+            numberOfRays 1
+          }
+        ]
+      }
+      Transform {
+        translation 0 0.05 -0.09
+        children [
+          DistanceSensor {
+            name "ir_left"
+            type "generic"
+            lookupTable [ 0 0 0, 0.16 1 0, 0.20 0 0 ]
+            numberOfRays 1
+          }
+        ]
+      }
+      Transform {
+        translation 0 0.05 0.09
+        rotation 0 1 0 3.14159
+        children [
+          DistanceSensor {
+            name "ir_right"
+            type "generic"
+            lookupTable [ 0 0 0, 0.16 1 0, 0.20 0 0 ]
+            numberOfRays 1
+          }
+        ]
+      }
+      Transform {
+        translation -0.14 0.05 0
+        rotation 0 1 0 1.5708
+        children [
+          DistanceSensor {
+            name "ir_rear"
+            type "generic"
+            lookupTable [ 0 0 0, 0.16 1 0, 0.20 0 0 ]
+            numberOfRays 1
+          }
+        ]
+      }
+      Transform {
+        translation 0.06 0.0 -0.03
+        rotation 1 0 0 -1.5708
+        children [
+          DistanceSensor {
+            name "line_left"
+            type "infra-red"
+            lookupTable [ 0 1 0, 0.04 0 0 ]
+            numberOfRays 1
+          }
+        ]
+      }
+      Transform {
+        translation 0.06 0.0 0
+        rotation 1 0 0 -1.5708
+        children [
+          DistanceSensor {
+            name "line_mid"
+            type "infra-red"
+            lookupTable [ 0 1 0, 0.04 0 0 ]
+            numberOfRays 1
+          }
+        ]
+      }
+      Transform {
+        translation 0.06 0.0 0.03
+        rotation 1 0 0 -1.5708
+        children [
+          DistanceSensor {
+            name "line_right"
+            type "infra-red"
+            lookupTable [ 0 1 0, 0.04 0 0 ]
+            numberOfRays 1
+          }
+        ]
+      }
+
+      # SG90 pan (Y) then tilt (Z). Sim home 0 rad = real pan 76 / tilt 90.
+      HingeJoint {
+        jointParameters HingeJointParameters {
+          axis 0 1 0
+          anchor 0.12 0.10 0
+        }
+        device [
+          RotationalMotor {
+            name "servo_pan"
+            minPosition -0.8727
+            maxPosition 0.8727
+            maxVelocity 3.5
+            maxTorque 0.15
+          }
+        ]
+        endPoint Solid {
+          translation 0.12 0.10 0
+          children [
+            Shape {
+              appearance PBRAppearance {
+                baseColor 0.85 0.75 0.2
+                roughness 0.4
+                metalness 0
+              }
+              geometry Box {
+                size 0.03 0.03 0.03
+              }
+            }
+            HingeJoint {
+              jointParameters HingeJointParameters {
+                axis 0 0 1
+                anchor 0.02 0.01 0
+              }
+              device [
+                RotationalMotor {
+                  name "servo_tilt"
+                  minPosition -0.6
+                  maxPosition 0.6
+                  maxVelocity 3.5
+                  maxTorque 0.15
+                }
+              ]
+              endPoint Solid {
+                translation 0.02 0.01 0
+                children [
+                  Transform {
+                    rotation 0 1 0 -1.5708
+                    children [
+                      DistanceSensor {
+                        name "sonic"
+                        type "sonar"
+                        lookupTable [
+                          0 0 0
+                          3.0 3.0 0.02
+                        ]
+                        numberOfRays 3
+                        aperture 0.26
+                      }
+                      Camera {
+                        name "cam_gimbal"
+                        width 80
+                        height 60
+                        fieldOfView 3.14159
+                        projection "spherical"
+                        near 0.02
+                      }
+                    ]
+                  }
+                ]
+                boundingObject Box {
+                  size 0.02 0.02 0.02
+                }
+                physics Physics {
+                  density -1
+                  mass 0.03
+                }
+              }
+            }
+          ]
+          boundingObject Box {
+            size 0.03 0.03 0.03
+          }
+          physics Physics {
+            density -1
+            mass 0.04
+          }
+        }
+      }
+
+      HingeJoint {
+        jointParameters HingeJointParameters {
+          axis 0 0 1
+          anchor 0.08 0 0.075
+        }
+        device [
+          RotationalMotor {
+            name "motor_fr"
+            maxVelocity 8
+            maxTorque 0.6
+          }
+        ]
+        endPoint DEF WHEEL_FR Solid {
+          translation 0.08 0 0.075
+          rotation 1 0 0 1.5708
+          children [
+            DEF WHEEL_SHAPE Shape {
+              appearance PBRAppearance {
+                baseColor 0.05 0.05 0.05
+                roughness 0.8
+                metalness 0
+              }
+              geometry Cylinder {
+                radius 0.0325
+                height 0.022
+              }
+            }
+          ]
+          name "wheel_fr"
+          boundingObject Cylinder {
+            radius 0.0325
+            height 0.022
+          }
+          physics Physics {
+            density -1
+            mass 0.05
+          }
+        }
+      }
+      HingeJoint {
+        jointParameters HingeJointParameters {
+          axis 0 0 1
+          anchor 0.08 0 -0.075
+        }
+        device [
+          RotationalMotor {
+            name "motor_fl"
+            maxVelocity 8
+            maxTorque 0.6
+          }
+        ]
+        endPoint Solid {
+          translation 0.08 0 -0.075
+          rotation 1 0 0 1.5708
+          children [
+            USE WHEEL_SHAPE
+          ]
+          name "wheel_fl"
+          boundingObject Cylinder {
+            radius 0.0325
+            height 0.022
+          }
+          physics Physics {
+            density -1
+            mass 0.05
+          }
+        }
+      }
+      HingeJoint {
+        jointParameters HingeJointParameters {
+          axis 0 0 1
+          anchor -0.08 0 0.075
+        }
+        device [
+          RotationalMotor {
+            name "motor_rr"
+            maxVelocity 8
+            maxTorque 0.6
+          }
+        ]
+        endPoint Solid {
+          translation -0.08 0 0.075
+          rotation 1 0 0 1.5708
+          children [
+            USE WHEEL_SHAPE
+          ]
+          name "wheel_rr"
+          boundingObject Cylinder {
+            radius 0.0325
+            height 0.022
+          }
+          physics Physics {
+            density -1
+            mass 0.05
+          }
+        }
+      }
+      HingeJoint {
+        jointParameters HingeJointParameters {
+          axis 0 0 1
+          anchor -0.08 0 -0.075
+        }
+        device [
+          RotationalMotor {
+            name "motor_rl"
+            maxVelocity 8
+            maxTorque 0.6
+          }
+        ]
+        endPoint Solid {
+          translation -0.08 0 -0.075
+          rotation 1 0 0 1.5708
+          children [
+            USE WHEEL_SHAPE
+          ]
+          name "wheel_rl"
+          boundingObject Cylinder {
+            radius 0.0325
+            height 0.022
+          }
+          physics Physics {
+            density -1
+            mass 0.05
+          }
+        }
+      }
+    ]
+    boundingObject Transform {
+      translation 0 0.055 0
+      children [
+        Box {
+          size 0.26 0.06 0.12
+        }
+      ]
+    }
+    physics Physics {
+      density -1
+      mass 1.4
+      centerOfMass [
+        0.01 0.04 0
+      ]
+    }
+  }
+}

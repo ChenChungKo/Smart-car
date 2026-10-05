@@ -155,6 +155,7 @@ class ArucoLocalizer:
         self.inlier_px = 5.0
         self.max_single_tag_m = 0.8
         self.last_rms_px: float | None = None
+        self.last_reject = ""
 
     def kd(self, camera: str, width: int, height: int):
         if camera not in self.base_kd:
@@ -346,6 +347,7 @@ class ArucoLocalizer:
     def fuse(self, fixes: list[TagFix], stamp: float = 0.0) -> Pose2D | None:
         """Joint planar fit of every tag corner from every camera."""
         self.last_rms_px = None
+        self.last_reject = "no tags"
         if not fixes:
             return None
         fixes = self._central(fixes)
@@ -367,11 +369,19 @@ class ArucoLocalizer:
         total = float(np.sqrt(np.mean(rms ** 2)))
         self.last_rms_px = total
         # A large residual on a flat-floor fit usually means pitch_deg in car_nav.json is off.
-        if total > 2.0 * self.max_err_px or not self._inside(x, y, 0.1):
+        if total > 2.0 * self.max_err_px:
+            self.last_reject = f"tags disagree (rms {total:.1f}px)"
+            return None
+        if not self._inside(x, y, 0.1):
+            self.last_reject = f"pose outside arena ({x:.2f},{y:.2f})"
             return None
         # One small far tag pins range and bearing loosely; wait for a second tag.
-        if len(fixes) == 1 and fixes[0].distance > self.max_single_tag_m:
+        tags = {(f.camera, f.tag_id) for f in fixes}
+        if len(tags) == 1 and min(f.distance for f in fixes) > self.max_single_tag_m:
+            cam, tag_id = next(iter(tags))
+            self.last_reject = f"only one far tag ({cam[0]}{tag_id} at {min(f.distance for f in fixes):.2f}m)"
             return None
+        self.last_reject = ""
         for f, e in zip(fixes, rms):
             f.fit_px = float(e)
         return Pose2D(x, y, wrap_rad(yaw), stamp, list(fixes), total)

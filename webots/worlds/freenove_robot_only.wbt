@@ -1,0 +1,36 @@
+#VRML_SIM R2023b utf8
+# Robot-only world. Your foam walls stay in the arena you already built.
+# To use that arena: copy the EXTERNPROTO line and the Freenove4WD node into it.
+
+EXTERNPROTO "webots://projects/objects/floors/protos/RectangleArena.proto"
+EXTERNPROTO "../protos/Freenove4WD.proto"
+
+WorldInfo {
+  title "Freenove 4WD robot (no foam walls)"
+  info [
+    "Insert Freenove4WD into the existing foam-wall world."
+    "Copy controllers/surround_cruise into that Webots project as well."
+  ]
+  basicTimeStep 16
+  contactProperties [
+    ContactProperties {
+      coulombFriction [
+        8
+      ]
+    }
+  ]
+}
+Viewpoint {
+  orientation -0.25 0.9 0.35 0.95
+  position 1.4 1.1 1.3
+}
+TexturedBackground {
+}
+TexturedBackgroundLight {
+}
+RectangleArena {
+  floorSize 3 3
+}
+Freenove4WD {
+  translation 0 0.0325 0
+}
