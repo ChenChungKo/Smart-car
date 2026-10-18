@@ -43,20 +43,14 @@ from ultrasonic import Ultrasonic
 from vision_detector import classic_corridor_score, draw_debug, wall_aim_point
 from csi_wall_aim import load_cfg as load_aim_cfg
 from csi_wall_aim import load_front_kd, pan_for_yaw, pixel_yaw_deg
+from ir_obstacle_config import expand_ir_hits, ir_obstacle_pins
 
 
 SERVER = Path(__file__).resolve().parent
 HARDWARE_PATH = SERVER / "camera_hardware.json"
 PARAMS_PATH = SERVER / "params.json"
 
-IR_PINS = {
-    "front_left": 26,
-    "front": 20,
-    "front_right": 19,
-    "left": 16,
-    "right": 6,
-    "rear": 12,
-}
+IR_PINS = ir_obstacle_pins()
 BOARD_SENSE_PINS = (14, 15, 23, *IR_PINS.values())
 
 
@@ -575,7 +569,7 @@ class SafetySensors:
         for name, device in self.ir.items():
             raw = int(device.value)
             values[name] = raw if self.args.active_high else int(not raw)
-        return values
+        return expand_ir_hits(values)
 
     def read_sonic(self) -> float | None:
         if self.sonic is None:

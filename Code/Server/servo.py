@@ -19,13 +19,51 @@ def load_gimbal_home() -> tuple[int, int]:
     return max(0, min(180, pan)), max(0, min(180, tilt))
 
 
+def load_right_90_pan(home_pan: int = 76) -> int:
+    """Servo angle that points 90 degrees to the car's right. Defaults to a 1:1 map."""
+    try:
+        data = json.loads(HOME_PATH.read_text(encoding="utf-8"))
+        return max(0, min(180, int(data.get("right_90_pan", home_pan + 90))))
+    except Exception:
+        return max(0, min(180, home_pan + 90))
+
+
+def load_left_90_pan() -> int | None:
+    """Servo angle that points 90 degrees to the car's left, if it has been measured."""
+    try:
+        data = json.loads(HOME_PATH.read_text(encoding="utf-8"))
+        if "left_90_pan" not in data:
+            return None
+        return max(0, min(180, int(data["left_90_pan"])))
+    except Exception:
+        return None
+
+
+def servo_pan_for_bearing(home_pan: int, right_90_pan: int, pan_deg: float,
+                          left_90_pan: int | None = None) -> int:
+    """Servo angle for a heading relative to straight ahead. Positive pan_deg is left."""
+    if pan_deg >= 0 and left_90_pan is not None:
+        span = home_pan - left_90_pan
+    else:
+        span = right_90_pan - home_pan
+    if span == 0:
+        span = 90
+    angle = home_pan - float(pan_deg) * (span / 90.0)
+    return max(0, min(180, int(round(angle))))
+
+
 def save_gimbal_home(pan: int, tilt: int) -> Path:
     pan, tilt = max(0, min(180, int(pan))), max(0, min(180, int(tilt)))
-    payload = {
-        "pan": pan,
-        "tilt": tilt,
-        "notes": "Straight-ahead pose used at cruise start (servo 0 pan, servo 1 tilt).",
-    }
+    try:
+        payload = json.loads(HOME_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        payload = {}
+    payload["pan"] = pan
+    payload["tilt"] = tilt
+    payload.setdefault(
+        "notes",
+        "pan/tilt is straight ahead. right_90_pan looks 90 degrees to the car's right.",
+    )
     HOME_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     return HOME_PATH
 

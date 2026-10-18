@@ -136,11 +136,15 @@ left middle right -> combined
 
 ## 額外 6 個紅外線避障感測器
 
-目前 GPIO 腳位：
+目前 GPIO 腳位（2026-10-14 實車對照，完整說明見 `Code/Server/ir_obstacle_pins.json`）：
 
 ```text
-GPIO26, GPIO20, GPIO19, GPIO16, GPIO6, GPIO12
+車頭左前 GPIO19   車頭右前 GPIO16
+左前輪 GPIO6      左後輪 GPIO26
+右前輪 GPIO12     右後輪 GPIO20
 ```
+
+監控：`python3 ir_obstacle_probe.py`
 
 測試：
 
@@ -154,6 +158,9 @@ python3 full_car_test.py --test obstacle
 GPIO 讀到 LOW  -> obstacle=1
 GPIO 讀到 HIGH -> obstacle=0
 ```
+
+2026-10-14 實測：六顆在障礙物約 **8 cm** 內會亮（見 `ir_obstacle_pins.json` 的 `trigger_distance_cm`）。
+模組上的可調電阻可改這個距離。
 
 ## 車頭 Servo
 
@@ -406,8 +413,8 @@ python3 safe_surround_cruise.py \
 避障一旦選定左轉或右轉，至少保持 0.8 秒，並持續到超音波距離大於
 30 cm 才解除；這可防止左右風險接近時來回切換方向。
 前方 IR 會禁止繼續直行並觸發避障轉向，左右 IR 會禁止往該側避讓。中央前方
-IR 只有在超音波進入 18 cm、或超音波暫時沒讀到時才參與決策，避免在約
-40 cm 就提早轉向。左前／右前 IR 的距離閘門較寬（28 cm），斜向靠近牆角時
+IR 只有在超音波進入 18 cm、或超音波暫時沒讀到時才參與決策（模組本身約 8 cm 才亮，
+這是軟體閘門，避免只靠 IR 誤判）。左前／右前 IR 的距離閘門較寬（28 cm），斜向靠近牆角時
 先轉車頭。超音波低於 32 cm 時即使畫面看起來空曠也改為慢行。
 
 超音波低於 12 cm 時優先原地轉向離開牆壁；左右都堵住且後方畫面清楚才倒車。

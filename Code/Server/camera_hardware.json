@@ -22,8 +22,7 @@
     "calibration_mode": "fisheye",
     "native_resolution": [1920, 1080],
     "recommended_capture": [640, 480],
-    "fov_deg": 180,
-    "notes": "裝在會動的雲台（servo 0 左右、servo 1 上下）。usb_bus=usb-xhci-hcd.0-1.2（目前 /dev/video18）。視覺自走掃前左／中／前右用。"
+    "notes": "裝在會動的雲台（servo 0 左右、servo 1 上下）。對角線魚眼（無黑圈、強桶狀變形），用 fisheye 內參。usb_bus=usb-xhci-hcd.0-1.2（目前 /dev/video18）。"
   },
   "left": {
     "position": "left",
@@ -36,8 +35,7 @@
     "calibration_mode": "fisheye",
     "native_resolution": [1920, 1080],
     "recommended_capture": [640, 480],
-    "fov_deg": 180,
-    "notes": "左側。視覺自走低頻抽幀防側撞。優先 YUYV。"
+    "notes": "左側。對角線魚眼（無黑圈、強桶狀變形），用 fisheye 內參。視覺自走低頻抽幀防側撞。優先 YUYV。"
   },
   "right": {
     "position": "right",
@@ -50,8 +48,7 @@
     "calibration_mode": "fisheye",
     "native_resolution": [1920, 1080],
     "recommended_capture": [640, 480],
-    "fov_deg": 180,
-    "notes": "右側。視覺自走低頻抽幀防側撞。usb_bus=usb-xhci-hcd.0-2（目前 /dev/video0；勿用 CSI 的 video10）。"
+    "notes": "右側。對角線魚眼（無黑圈、強桶狀變形），用 fisheye 內參。視覺自走低頻抽幀防側撞。usb_bus=usb-xhci-hcd.0-2（目前 /dev/video0；勿用 CSI 的 video10）。"
   },
   "rear": {
     "position": "rear",
@@ -69,6 +66,6 @@
     "intrinsic_tool": "IntrinsicCalibration/intrinsicCalib.py",
     "frame_width": 640,
     "frame_height": 480,
-    "notes": "front=CSI1、left/right/gimbal=USB、rear=CSI0。換鏡後需重標 fisheye K/D。"
+    "notes": "front=CSI1、rear=CSI0 為圓形魚眼；left/right/gimbal=USB 為對角線魚眼。全部使用 fisheye K/D。換鏡後需重標。"
   }
 }

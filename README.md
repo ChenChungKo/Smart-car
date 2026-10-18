@@ -94,10 +94,12 @@ left-turn-90-duration = 2.4
 right-turn-90-duration = 2.1
 ```
 
-額外 6 個紅外線避障感測器 GPIO：
+額外 6 個紅外線避障感測器 GPIO（詳見 `Code/Server/ir_obstacle_pins.json`）：
 
 ```text
-GPIO26, GPIO20, GPIO19, GPIO16, GPIO6, GPIO12
+車頭左前 GPIO19   車頭右前 GPIO16
+左前輪 GPIO6      左後輪 GPIO26
+右前輪 GPIO12     右後輪 GPIO20
 ```
 
 避障感測器目前為 LOW 觸發：
@@ -106,6 +108,9 @@ GPIO26, GPIO20, GPIO19, GPIO16, GPIO6, GPIO12
 GPIO 讀到 LOW  -> obstacle=1
 GPIO 讀到 HIGH -> obstacle=0
 ```
+
+六顆實測約 **8 cm** 內障礙物會亮（`ir_obstacle_pins.json` → `trigger_distance_cm`）。
+跟路時前 IR 仍要等超音波夠近才採信，與模組物理距離無關。
 
 USB 相機配置：
 
@@ -333,7 +338,7 @@ Code/Server/camera_hardware.json
 航點路線也寫在 `arena_map.json` 的 `routes`：
 
 ```text
-loop  四角來回： (0.35,0.35) → (1.05,0.35) → (1.05,1.05) → (0.35,1.05) → 起點
+rect / loop  完整四邊形（預設 rect）： (0.35,0.35) → (1.05,0.35) → (1.05,1.05) → (0.35,1.05) → 起點
 line  橫向一線： (0.35,0.70) → (1.05,0.70)
 ```
 
@@ -393,13 +398,13 @@ python3 aruco_localizer.py --calibrate-pitch 20
 python3 route_follow.py --calibrate-motion --arm
 
 # 乾跑：只定位、印計畫，馬達不轉
-python3 route_follow.py --route loop
+python3 route_follow.py --route rect
 
 # 實跑一圈
-python3 route_follow.py --route loop --arm
+python3 route_follow.py --route rect --arm
 
 # 反覆跑直到 Ctrl+C
-python3 route_follow.py --route loop --arm --repeat
+python3 route_follow.py --route rect --arm --repeat
 ```
 
 安全層（會覆寫導航指令）：
@@ -420,7 +425,7 @@ python3 route_follow.py --route loop --arm --repeat
 3. 車放場地中央，跑 `python3 aruco_localizer.py`，確認 `x≈0.70 y≈0.70`、`rms` 約 2–4 px。
 4. 用手推到 2–3 個用尺量過的位置，比對畫面座標（誤差目標約 3 cm 內）。
 5. `python3 route_follow.py --calibrate-motion --arm`。
-6. `python3 route_follow.py --route loop` 乾跑，再 `--arm`。
+6. `python3 route_follow.py --route rect` 乾跑，再 `--arm`。
 
 ### 相關檔案
 

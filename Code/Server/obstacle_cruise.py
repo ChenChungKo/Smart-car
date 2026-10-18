@@ -19,15 +19,10 @@ from motor import Ordinary_Car
 from servo import Servo
 from ultrasonic import Ultrasonic
 
-# BCM GPIO. Names are for the cruise logic; remap with CLI if wiring differs.
-DEFAULT_PINS = {
-    "front_left": 26,
-    "front": 20,
-    "front_right": 19,
-    "left": 16,
-    "right": 6,
-    "rear": 12,
-}
+from ir_obstacle_config import expand_ir_hits, ir_obstacle_pins
+
+# Physical pins from ir_obstacle_pins.json; CLI --pin-* overrides per key.
+DEFAULT_PINS = ir_obstacle_pins()
 
 
 def parse_args():
@@ -78,15 +73,8 @@ class ObstacleCruise:
         self.hold_pwm = (0, 0, 0, 0)
         self.hold_action = "forward"
         self.sensors = {}
-        pin_map = {
-            "front_left": args.pin_front_left,
-            "front": args.pin_front,
-            "front_right": args.pin_front_right,
-            "left": args.pin_left,
-            "right": args.pin_right,
-            "rear": args.pin_rear,
-        }
-        for name, pin in pin_map.items():
+        for name in DEFAULT_PINS:
+            pin = getattr(args, f"pin_{name}")
             self.sensors[name] = (pin, DigitalInputDevice(pin, pull_up=False))
         self.servo.set_servo_pwm("0", self.scan_angles[1])
         self.servo.set_servo_pwm("1", self.tilt_angles[1])
@@ -97,7 +85,7 @@ class ObstacleCruise:
         for name, (_pin, device) in self.sensors.items():
             raw = int(device.value)
             hits[name] = raw if self.args.active_high else int(not raw)
-        return hits
+        return expand_ir_hits(hits)
 
     def drive(self, fl, bl, fr, br):
         if self.motor is None:

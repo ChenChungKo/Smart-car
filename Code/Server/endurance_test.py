@@ -343,7 +343,11 @@ def build_parser():
     parser.add_argument("--cutoff-samples", type=int, default=3, help="Stop after this many consecutive samples at or below cutoff voltage.")
     parser.add_argument("--max-minutes", type=float, help="Optional maximum runtime in minutes.")
     parser.add_argument("--sample-interval", type=float, default=5.0, help="Seconds between battery/sensor log samples.")
-    parser.add_argument("--obstacle-pins", default="26,20,19,16,6,12", help="Comma-separated BCM GPIO pins for obstacle sensors.")
+    parser.add_argument(
+        "--obstacle-pins",
+        default="19,16,6,26,12,20",
+        help="Comma-separated BCM GPIO pins (see ir_obstacle_pins.json).",
+    )
     parser.set_defaults(obstacle_active_high=False)
     parser.add_argument("--obstacle-active-high", action="store_true", help="Treat HIGH as obstacle detected.")
     parser.add_argument("--obstacle-active-low", action="store_false", dest="obstacle_active_high", help="Treat LOW as obstacle detected.")

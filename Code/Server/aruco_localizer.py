@@ -110,7 +110,8 @@ class Pose2D:
         return math.degrees(self.yaw)
 
     def text(self) -> str:
-        ids = ",".join(f"{f.camera[0]}{f.tag_id}" for f in self.fixes) or "dead-reckon"
+        cam_ch = {"front": "f", "rear": "r", "left": "L", "right": "R"}
+        ids = ",".join(f"{cam_ch.get(f.camera, f.camera[0])}{f.tag_id}" for f in self.fixes) or "dead-reckon"
         return f"x={self.x:.2f} y={self.y:.2f} yaw={self.yaw_deg:+.0f}deg [{ids}]"
 
 
@@ -161,10 +162,18 @@ class ArucoLocalizer:
         if camera not in self.base_kd:
             folder = CALIB / "captures" / camera
             k = np.load(folder / "camera_0_K.npy").astype(np.float64)
-            d = np.load(folder / "camera_0_D.npy").astype(np.float64).reshape(-1, 1)[:4]
+            d = np.load(folder / "camera_0_D.npy").astype(np.float64).reshape(-1, 1)
+            # Four coefficients are the fisheye model (front and rear CSI). USB cameras use the standard model.
+            if d.shape[0] == 4:
+                d = d[:4]
             self.base_kd[camera] = (k, d)
         k, d = self.base_kd[camera]
         return np.diag([width / CALIB_W, height / CALIB_H, 1.0]) @ k, d
+
+    def fisheye(self, camera: str) -> bool:
+        if camera not in self.base_kd:
+            self.kd(camera, CALIB_W, CALIB_H)
+        return self.base_kd[camera][1].shape[0] <= 4
 
     def rectifier(self, camera: str, width: int, height: int):
         """Pinhole view of the central +-65 deg, where close tags have straight edges."""
@@ -186,8 +195,14 @@ class ArucoLocalizer:
         found = {}
         corners, ids, _ = self.detector.detectMarkers(gray)
         for quad, tag_id in zip(corners, [] if ids is None else ids.flatten()):
-            norm = cv2.fisheye.undistortPoints(quad.reshape(-1, 1, 2).astype(np.float64), k, d)
+            pixels = quad.reshape(-1, 1, 2).astype(np.float64)
+            if self.fisheye(camera):
+                norm = cv2.fisheye.undistortPoints(pixels, k, d)
+            else:
+                norm = cv2.undistortPoints(pixels, k, d)
             found[int(tag_id)] = (quad.reshape(4, 2), norm.reshape(4, 2))
+        if not self.fisheye(camera):
+            return found, float(k[0, 0])
         m1, m2, new_k = self.rectifier(camera, w, h)
         corners, ids, _ = self.detector.detectMarkers(cv2.remap(gray, m1, m2, cv2.INTER_LINEAR))
         for quad, tag_id in zip(corners, [] if ids is None else ids.flatten()):
@@ -222,9 +237,11 @@ class ArucoLocalizer:
             return found, corners, ids
         k, d = self.kd(camera, gray.shape[1], gray.shape[0])
         for quad, tag_id in zip(corners, ids.flatten()):
-            norm = cv2.fisheye.undistortPoints(
-                quad.reshape(-1, 1, 2).astype(np.float64), k, d
-            ).reshape(-1, 2)
+            pixels = quad.reshape(-1, 1, 2).astype(np.float64)
+            if self.fisheye(camera):
+                norm = cv2.fisheye.undistortPoints(pixels, k, d).reshape(-1, 2)
+            else:
+                norm = cv2.undistortPoints(pixels, k, d).reshape(-1, 2)
             ok, rvecs, tvecs, errs = cv2.solvePnPGeneric(
                 self.object_points, norm, np.eye(3), None, flags=cv2.SOLVEPNP_IPPE_SQUARE
             )
@@ -263,7 +280,7 @@ class ArucoLocalizer:
                 view = math.degrees(math.acos(float(np.clip(facing, -1.0, 1.0))))
                 best = (score, world_T_car, float(np.linalg.norm(t)), err_px, tilt, view)
         _score, T, distance, err_px, tilt, view = best
-        if distance > self.max_distance_m or err_px > self.max_err_px:
+        if distance > self.max_distance_m or err_px > self.max_err_px or tilt > 45.0:
             return None
         x, y = float(T[0, 3]), float(T[1, 3])
         # A far tag alone gives a poor pose, but its corners still help the joint fit.
@@ -375,16 +392,40 @@ class ArucoLocalizer:
         if not self._inside(x, y, 0.1):
             self.last_reject = f"pose outside arena ({x:.2f},{y:.2f})"
             return None
-        # One small far tag pins range and bearing loosely; wait for a second tag.
-        tags = {(f.camera, f.tag_id) for f in fixes}
-        if len(tags) == 1 and min(f.distance for f in fixes) > self.max_single_tag_m:
-            cam, tag_id = next(iter(tags))
-            self.last_reject = f"only one far tag ({cam[0]}{tag_id} at {min(f.distance for f in fixes):.2f}m)"
-            return None
+        # One tag is enough. Obstacles hide the others, so a single far tag is used;
+        # route_follow still ignores it when it jumps far from the current pose.
         self.last_reject = ""
         for f, e in zip(fixes, rms):
             f.fit_px = float(e)
         return Pose2D(x, y, wrap_rad(yaw), stamp, list(fixes), total)
+
+    def fuse_available(self, fixes: list[TagFix], stamp: float = 0.0) -> Pose2D | None:
+        """Prefer calibrated front and rear CSI cameras; fall back to close side USB tags (< 55 cm)
+        when CSI tags are occluded so the car still knows where it is near walls."""
+        csi = [f for f in fixes if f.camera in ("front", "rear")]
+        if csi:
+            pose = self.fuse(csi, stamp)
+            if pose is not None:
+                return pose
+            # Front or rear tags were seen but do not agree. A close side-camera
+            # pose can be tens of centimetres off, so use the sharpest single
+            # CSI tag that lands inside the arena instead.
+            best = self._single_tag_pose(csi, stamp)
+            if best is not None:
+                self.last_reject = ""
+                return best
+            return None
+        close_side = [f for f in fixes if f.camera in ("left", "right") and f.distance <= 0.55]
+        if close_side:
+            return self.fuse(close_side, stamp)
+        return None
+
+    def _single_tag_pose(self, fixes: list[TagFix], stamp: float) -> Pose2D | None:
+        usable = [f for f in fixes if f.usable and self._inside(f.x, f.y, 0.0)]
+        if not usable:
+            return None
+        best = min(usable, key=lambda f: (f.err_px, f.distance))
+        return Pose2D(best.x, best.y, wrap_rad(best.yaw), stamp, [best], best.err_px)
 
     def fit_pitch(self, fixes: list[TagFix]) -> tuple[dict[str, float], float | None]:
         """Pitch per camera that sees two or more tags, car parked on a flat floor."""
@@ -428,9 +469,16 @@ class CsiGrabber:
                 camera = Picamera2(camera_num=self.camera_num)
                 camera.configure(create_csi_still_configuration(camera, self.width, self.height))
                 camera.start()
-                camera.set_controls({"AeEnable": True, "AwbEnable": True})
-                time.sleep(0.8)
-                print(f"{self.name}: CSI camera_num={self.camera_num} {self.width}x{self.height}", flush=True)
+                # Auto exposure saves the first dark frames. Hold a fixed exposure instead.
+                camera.set_controls({
+                    "AeEnable": False,
+                    "AwbEnable": True,
+                    "ExposureTime": 40000,
+                    "AnalogueGain": 4.0,
+                })
+                time.sleep(0.4)
+                print(f"{self.name}: CSI camera_num={self.camera_num} {self.width}x{self.height} "
+                      f"exposure 40 ms gain 4", flush=True)
                 while not self._stop.is_set():
                     frame = csi_array_to_bgr(camera.capture_array())
                     with self._lock:
@@ -457,12 +505,87 @@ class CsiGrabber:
         self._thread.join(timeout=3.0)
 
 
-def open_grabbers(car: dict, width: int, height: int, rear: bool = True) -> dict[str, CsiGrabber]:
+class UsbGrabber:
+    """Latest frame from one side USB camera, captured at the 640x480 calibration size."""
+
+    def __init__(self, name: str):
+        self.name = name
+        self.width = CALIB_W
+        self.height = CALIB_H
+        self._lock = threading.Lock()
+        self._frame = None
+        self._stamp = 0.0
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True, name=f"usb-{name}")
+        self.error = ""
+
+    def start(self):
+        self._thread.start()
+        return self
+
+    def _run(self):
+        import json
+
+        import cv2
+
+        from camera_devices import resolve_usb_capture_index
+
+        hardware = json.loads((SERVER / "camera_hardware.json").read_text(encoding="utf-8"))
+        force_list = False
+        while not self._stop.is_set():
+            cap = None
+            try:
+                index, note = resolve_usb_capture_index(hardware[self.name], force_list=force_list)
+                cap = cv2.VideoCapture(index, cv2.CAP_V4L2)
+                if not cap.isOpened():
+                    raise RuntimeError(f"cannot open /dev/video{index}")
+                cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"YUYV"))
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                print(f"{self.name}: USB {note} {self.width}x{self.height}", flush=True)
+                self.error = ""
+                misses = 0
+                while not self._stop.is_set():
+                    ok, frame = cap.read()
+                    if not ok or frame is None:
+                        misses += 1
+                        if misses >= 4:
+                            raise RuntimeError(f"/dev/video{index} stopped delivering frames")
+                        time.sleep(0.05)
+                        continue
+                    misses = 0
+                    with self._lock:
+                        self._frame = frame
+                        self._stamp = time.monotonic()
+            except Exception as exc:
+                self.error = str(exc)
+                print(f"WARNING {self.name}: {exc}; reopening", flush=True)
+            finally:
+                if cap is not None:
+                    cap.release()
+            force_list = True
+            self._stop.wait(0.4)
+
+    def latest(self):
+        with self._lock:
+            return self._frame, self._stamp
+
+    def close(self):
+        self._stop.set()
+        self._thread.join(timeout=3.0)
+
+
+def open_grabbers(car: dict, width: int, height: int, rear: bool = True, sides: bool = True):
     names = ["front", "rear"] if rear else ["front"]
     grabbers = {}
     for name in names:
         mount = car["camera_mounts"][name]
         grabbers[name] = CsiGrabber(name, int(mount["camera_num"]), width, height).start()
+    if sides:
+        for name in ("left", "right"):
+            if name in car.get("camera_mounts", {}):
+                grabbers[name] = UsbGrabber(name).start()
     return grabbers
 
 
@@ -630,7 +753,7 @@ def main():
                     break
                 time.sleep(max(0.0, period - (time.monotonic() - started)))
                 continue
-            pose = loc.fuse(all_fixes, started)
+            pose = loc.fuse_available(all_fixes, started)
             if pose is not None:
                 trail.append((pose.x, pose.y, pose.yaw))
                 trail = trail[-200:]
