@@ -20,8 +20,10 @@ little wrong, as on the real car. Localization is the true pose plus noise.
 
 from __future__ import annotations
 
+import json
 import math
 import random
+from types import SimpleNamespace
 from dataclasses import dataclass
 
 from aruco_localizer import Pose2D
@@ -47,6 +49,10 @@ class MotionError:
     strafe: float = 0.90
     turn: float = 0.97
     drift_deg_per_m: float = 4.0   # the real car drifts left while driving straight
+    strafe_yaw_deg_per_m: float = 0.0  # a strafe to the left turns the car this much clockwise (unequal wheels)
+    fix_outlier: float = 0.0       # share of tag fixes that are wrong: 12-20 cm off, heading up to 35 deg off
+    realistic_fixes: bool = True   # tag noise grows with the nearest tag's distance (else 1 cm / 1 deg)
+    fix_loss: float = 0.0          # share of tag looks that give no fix (far tags only): position is dead-reckoned
     fix_sigma_m: float = 0.01      # tag fix noise
     fix_sigma_deg: float = 1.0
 
@@ -89,6 +95,9 @@ class _Servo:
         if channel == "0":  # pan: route_follow sends home_pan - pan_deg
             self.car.pan_deg = self.car.home_pan - float(value)
 
+    def set_pan(self, value: float):
+        self.set_servo_pwm("0", value)
+
 
 class _Sensors:
     def __init__(self, car: "SimFollower"):
@@ -105,6 +114,23 @@ class _Sensors:
         pass
 
 
+class SimScanner:
+    """foot_cam.CameraScanner on a simulated world: the foot-line finder's report, by ray casting."""
+
+    def __init__(self, world):
+        self.world = world
+
+    def scan(self, aim, pans):
+        views = []
+        for pan in pans:
+            aim(pan)
+            views.append(self.world.foot_view(pan))
+        return views
+
+    def close(self):
+        pass
+
+
 class SimFollower(RouteFollower):
     def __init__(self, args, world, error: MotionError | None = None, max_moves: int = 2000):
         super().__init__(args)
@@ -112,10 +138,13 @@ class SimFollower(RouteFollower):
         self.error = error or MotionError()
         self.max_moves = max_moves
         self.moves = 0
+        self.pose_errors: list[tuple[float, float]] = []
         self.pan_deg = 0.0
         self.stop_event = _Clock(world)
         self.sensors = _Sensors(self)
         self.servo = _Servo(self)
+        if args.hug and args.detour and args.camera_obstacles and hasattr(world, "foot_view"):
+            self.scanner = SimScanner(world)
 
     # ---- hardware ---------------------------------------------------------
 
@@ -131,6 +160,9 @@ class SimFollower(RouteFollower):
 
     def close(self):
         self.save_map()
+        if self.obstacles.blocks:
+            (self.debug_dir / "obstacles.json").write_text(
+                json.dumps(self.obstacles.as_dict(), indent=2) + "\n", encoding="utf-8")
         if self.writer is not None:
             self.writer.release()
 
@@ -143,13 +175,28 @@ class SimFollower(RouteFollower):
         self.world.tick(self.args.settle_s)
         x, y, yaw = self.world.truth
         e = self.error
-        fix = Pose2D(x + random.gauss(0.0, e.fix_sigma_m), y + random.gauss(0.0, e.fix_sigma_m),
-                     yaw + math.radians(random.gauss(0.0, e.fix_sigma_deg)))
-        return self.accept_fix(fix)
+        if e.fix_loss and random.random() < e.fix_loss:
+            return self.accept_fix(None)
+        if not e.realistic_fixes:  # equal noise at any distance, as a fix of two tags 80 cm away
+            fixes = [SimpleNamespace(camera="front", tag_id=k, distance=0.8 + 0.1 * k) for k in range(2)]
+            return self.accept_fix(Pose2D(x + random.gauss(0.0, e.fix_sigma_m), y + random.gauss(0.0, e.fix_sigma_m),
+                                          yaw + math.radians(random.gauss(0.0, e.fix_sigma_deg)), fixes=fixes))
+        d = random.uniform(0.45, 1.35)                      # nearest tag of the fix
+        n = 3 if d < 0.9 else 2                             # tags in it
+        sxy, syaw = 0.02 + 0.06 * d, math.radians(1.0 + 3.0 * d)
+        px, py, pyaw = x + random.gauss(0.0, sxy), y + random.gauss(0.0, sxy), yaw + random.gauss(0.0, syaw)
+        if e.fix_outlier and random.random() < e.fix_outlier:
+            jump, angle = random.uniform(0.12, 0.20), random.uniform(0.0, 2.0 * math.pi)
+            px, py = px + jump * math.cos(angle), py + jump * math.sin(angle)
+            pyaw += math.radians(random.uniform(-35.0, 35.0))
+        fixes = [SimpleNamespace(camera="front", tag_id=k, distance=d + 0.12 * k) for k in range(n)]
+        return self.accept_fix(Pose2D(px, py, pyaw, fixes=fixes))
 
     def move(self, kind: str, duration: float) -> tuple[float, str | None]:
         """The same timed motion as on the car: forward stops early for a safety reason."""
         m, e = self.motion, self.error
+        if kind not in ("left", "right"):
+            self.last_turn = None
         vx, vy, wz = {
             "forward": (m["forward_mps"] * e.forward, 0.0, 0.0),
             "reverse": (-m["forward_mps"] * e.forward, 0.0, 0.0),
@@ -164,6 +211,7 @@ class SimFollower(RouteFollower):
         while t < duration - 1e-9:
             x, y, yaw = self.world.truth
             yaw += wz * dt + (math.radians(e.drift_deg_per_m) * vx * dt if kind == "forward" else 0.0)
+            yaw -= math.radians(e.strafe_yaw_deg_per_m) * vy * dt
             x += (vx * math.cos(yaw) - vy * math.sin(yaw)) * dt
             y += (vx * math.sin(yaw) + vy * math.cos(yaw)) * dt
             what = self.world.hits(x, y, yaw)
@@ -182,4 +230,9 @@ class SimFollower(RouteFollower):
         if self.moves > self.max_moves:
             raise Abort(f"SIM: more than {self.max_moves} moves; stuck")
         self.dead_reckon(kind, t)
+        if self.pose is not None:  # how wrong the car's idea of where it is, against the truth
+            tx, ty, tyaw = self.world.truth
+            self.pose_errors.append((math.hypot(self.pose.x - tx, self.pose.y - ty),
+                                     abs(math.degrees(math.atan2(math.sin(self.pose.yaw - tyaw),
+                                                                 math.cos(self.pose.yaw - tyaw))))))
         return t, reason

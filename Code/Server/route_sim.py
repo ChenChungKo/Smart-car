@@ -27,6 +27,7 @@ import sys
 from pathlib import Path
 
 import cv2
+import numpy as np
 
 from aruco_localizer import MAP_PATH, load_json
 from route_follow import Abort, parse_args as route_args
@@ -46,25 +47,61 @@ LAYOUTS = {
 class FlatWorld:
     """The arena as rectangles on the floor; rays for the ultrasonic and IR."""
 
-    def __init__(self, size_m, blocks_m, home, sonic_half_deg: float = 8.0):
+    def __init__(self, size_m, blocks_m, home, sonic_half_deg: float = 8.0, dark_blocks: bool = False):
         self.w, self.h = size_m
         self.blocks = blocks_m
+        self.dark_blocks = dark_blocks  # IR modules do not see dark foam, only the walls
         self.truth = list(home)
         self.sonic_half = sonic_half_deg
         self.time = 0.0
+        self.min_clear_cm = 99.0
 
     def inside_block(self, x: float, y: float) -> bool:
         return any(x0 <= x <= x1 and y0 <= y <= y1 for x0, x1, y0, y1 in self.blocks)
 
-    def ray(self, ox: float, oy: float, angle: float, max_m: float = 2.0) -> float | None:
+    def ray(self, ox: float, oy: float, angle: float, max_m: float = 2.0, blocks: bool = True) -> float | None:
         dx, dy = math.cos(angle), math.sin(angle)
         d = 0.0
         while d < max_m:
             x, y = ox + dx * d, oy + dy * d
-            if not (0.0 <= x <= self.w and 0.0 <= y <= self.h) or self.inside_block(x, y):
+            if not (0.0 <= x <= self.w and 0.0 <= y <= self.h) or (blocks and self.inside_block(x, y)):
                 return d
             d += 0.003
         return None
+
+    def foot_view(self, pan_deg: float, rng=None):
+        """What the gimbal camera's foot-line finder would report from here at `pan_deg` (car frame).
+
+        Rays across +-40 deg of the camera's view meet the first wall or block within 0.5 m. The floor is
+        visible from BLIND_M out from the camera: nearer, the finder only knows "something at least this
+        near" (a `close` point at BLIND_M). The range error grows with distance (a degree of tilt is 6 cm
+        at 60 cm), and the gimbal is a degree off.
+        """
+        from foot_cam import FootView
+
+        rng = rng or random
+        x, y, yaw = self.truth
+        mx, my = 0.08 + 0.02 * math.cos(math.radians(pan_deg)), 0.02 * math.sin(math.radians(pan_deg))
+        c, s = math.cos(yaw), math.sin(yaw)
+        ox, oy = x + c * mx - s * my, y + s * mx + c * my
+        tilt = rng.gauss(0.0, 1.0)
+        points, close = [], []
+        for a in np.arange(-40.0, 40.1, 1.0):
+            bearing = math.radians(pan_deg + a + tilt)
+            d = self.ray(ox, oy, yaw + bearing, 0.5)
+            if d is None:
+                continue
+            if d < self.BLIND_M:
+                r = self.BLIND_M
+                close.append((mx + r * math.cos(bearing), my + r * math.sin(bearing)))
+                continue
+            r = d + rng.gauss(0.0, 0.008 + 0.04 * (d / 0.5) ** 2)
+            points.append((mx + r * math.cos(bearing), my + r * math.sin(bearing)))
+        empty = np.zeros(0)
+        return FootView(pan_deg, empty, empty, np.array(points).reshape(-1, 2), np.array(close).reshape(-1, 2),
+                        np.zeros(0, bool))
+
+    BLIND_M = 0.23  # the car showed its blind floor at x=30-32 cm (car frame): 15-17 cm ahead of the nose
 
     def place(self, x: float, y: float, yaw: float):
         self.truth = [x, y, yaw]
@@ -87,7 +124,7 @@ class FlatWorld:
         out = {}
         for name, (lx, ly, look) in IR_LAYOUT.items():
             px, py = x + lx * c - ly * s, y + lx * s + ly * c
-            out[name] = int(self.ray(px, py, yaw + math.radians(look), IR_RANGE_M) is not None)
+            out[name] = int(self.ray(px, py, yaw + math.radians(look), IR_RANGE_M, not self.dark_blocks) is not None)
         return out
 
     def hits(self, x: float, y: float, yaw: float) -> str | None:
@@ -96,6 +133,10 @@ class FlatWorld:
                 return "a wall"
             if self.inside_block(px, py):
                 return f"a block at ({px * 100:.0f},{py * 100:.0f})cm"
+            for x0, x1, y0, y1 in self.blocks:  # closest the body has been to a block (cm)
+                d = math.hypot(max(x0 - px, 0.0, px - x1), max(y0 - py, 0.0, py - y1)) * 100.0
+                if d < self.min_clear_cm:
+                    self.min_clear_cm = d
         return None
 
 
@@ -152,7 +193,8 @@ def draw(path: Path, blocks_m, w: float, h: float):
     cv2.imwrite(str(path), img)
 
 
-def run_once(name: str, blocks_m, seed: int, extra: list[str], error: MotionError, quiet: bool) -> dict:
+def run_once(name: str, blocks_m, seed: int, extra: list[str], error: MotionError, quiet: bool,
+             dark: bool = False, sonic_half_deg: float = 8.0) -> dict:
     random.seed(seed)
     out = OUT / name
     out.mkdir(parents=True, exist_ok=True)
@@ -160,7 +202,7 @@ def run_once(name: str, blocks_m, seed: int, extra: list[str], error: MotionErro
     arena = load_json(MAP_PATH)
     home = arena["home"]
     world = FlatWorld([float(v) for v in arena["arena_size_m"]], blocks_m,
-                      (home[0], home[1], math.radians(home[2])))
+                      (home[0], home[1], math.radians(home[2])), sonic_half_deg, dark_blocks=dark)
     log = io.StringIO()
     result = {"name": name, "seed": seed}
     with contextlib.redirect_stdout(log if quiet else sys.stdout):
@@ -178,7 +220,10 @@ def run_once(name: str, blocks_m, seed: int, extra: list[str], error: MotionErro
         (out / "run.log").write_text(log.getvalue(), encoding="utf-8")
     draw(out / "trajectory.png", blocks_m, world.w, world.h)
     text = log.getvalue()
-    result.update(detours=text.count("going around"), moves=car.moves, minutes=world.time / 60.0)
+    errs = np.array(car.pose_errors) if car.pose_errors else np.zeros((1, 2))
+    result.update(detours=text.count("going around"), moves=car.moves, minutes=world.time / 60.0,
+                  pose_cm=float(np.percentile(errs[:, 0], 90) * 100), yaw_deg=float(np.percentile(errs[:, 1], 90)),
+                  clear_cm=world.min_clear_cm)
     return result
 
 
@@ -196,9 +241,22 @@ def main():
     p.add_argument("--runs", type=int, default=1, help="Repeat with different random noise.")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--verbose", action="store_true", help="Print route_follow's log instead of saving it.")
+    p.add_argument("--sonic-half-deg", type=float, default=8.0,
+                   help="Half width of the simulated ultrasonic beam. The real one barely sees a block that "
+                        "only covers the edge of the path, which a narrow beam (3) imitates.")
+    p.add_argument("--dark-blocks", action="store_true",
+                   help="The IR modules do not see the blocks (dark foam), only the walls.")
     p.add_argument("--forward-error", type=float, default=MotionError.forward)
     p.add_argument("--strafe-error", type=float, default=MotionError.strafe)
     p.add_argument("--turn-error", type=float, default=MotionError.turn)
+    p.add_argument("--simple-fixes", action="store_true",
+                   help="Tag fixes with 1 cm / 1 deg noise at any distance, instead of noise growing with it.")
+    p.add_argument("--fix-outlier", type=float, default=0.0,
+                   help="Share of tag fixes that are wrong (12-20 cm off, heading up to 35 deg off).")
+    p.add_argument("--strafe-yaw", type=float, default=0.0,
+                   help="Degrees the car turns per metre of strafe (the real one: about 90).")
+    p.add_argument("--fix-loss", type=float, default=0.0,
+                   help="Share of tag looks that give no fix (far tags): the pose drifts like in the real lap.")
     a = p.parse_args(argv)
     specs = a.blocks if a.blocks is not None else LAYOUTS[a.layout]
     blocks_m = []
@@ -209,15 +267,18 @@ def main():
         blocks_m = world_blocks(Path(a.world))
         print(f"{len(blocks_m)} obstacles from {a.world} (cm): " +
               ", ".join(f"x {b[0] * 100:.0f}~{b[1] * 100:.0f} y {b[2] * 100:.0f}~{b[3] * 100:.0f}" for b in blocks_m))
-    error = MotionError(forward=a.forward_error, strafe=a.strafe_error, turn=a.turn_error)
+    error = MotionError(forward=a.forward_error, strafe=a.strafe_error, turn=a.turn_error, fix_loss=a.fix_loss,
+                         strafe_yaw_deg_per_m=a.strafe_yaw,
+                         fix_outlier=a.fix_outlier, realistic_fixes=not a.simple_fixes)
     label = Path(a.world).stem if a.world else "custom" if a.blocks is not None else a.layout
-    results = [run_once(f"{label}_{a.seed + k}", blocks_m, a.seed + k, extra, error, not a.verbose)
+    results = [run_once(f"{label}_{a.seed + k}", blocks_m, a.seed + k, extra, error, not a.verbose, a.dark_blocks,
+                        a.sonic_half_deg)
                for k in range(a.runs)]
-    print(f"\n{'run':<14}{'result':<9}{'detours':>8}{'moves':>7}{'sim min':>9}{'home cm':>9}  note")
+    print(f"\n{'run':<14}{'result':<9}{'detours':>8}{'moves':>7}{'sim min':>9}{'home cm':>9}{'pose p90':>10}  note")
     for r in results:
         home = "-" if r["home_cm"] is None else f"{r['home_cm']:.1f}"
         print(f"{r['name']:<14}{'OK' if r['ok'] else 'STOP':<9}{r['detours']:>8}{r['moves']:>7}"
-              f"{r['minutes']:>9.1f}{home:>9}  {'' if r['ok'] else r['why']}")
+              f"{r['minutes']:>9.1f}{home:>9}{r['pose_cm']:>7.0f}cm/{r['yaw_deg']:.0f}deg  {'' if r['ok'] else r['why']}")
     ok = sum(r["ok"] for r in results)
     print(f"\n{ok}/{len(results)} laps finished; logs and trajectories in {OUT}/")
 
