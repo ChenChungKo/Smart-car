@@ -39,6 +39,8 @@ from aruco_localizer import (
     open_grabbers,
     wrap_rad,
 )
+from obstacle_map import ObstacleMap, path_gap, shift_to_clear, split_walls, to_world
+from pose_kalman import PoseKalman
 from vision_detector import classic_corridor_score
 
 SERVER = Path(__file__).resolve().parent
@@ -46,6 +48,17 @@ SONIC_PIVOT_M = 0.085  # gimbal pan axis ahead of the car centre (the ultrasonic
 SONIC_ARM_M = 0.03     # ultrasonic face ahead of the pan axis
 SONIC_AHEAD_M = SONIC_PIVOT_M + SONIC_ARM_M  # ultrasonic face ahead of the car centre, facing forward
 BLOCK_LONG_M = 0.20    # longest side of an obstacle block (arena_map.json obstacle_block_m)
+SONIC_HALF_DEG = 8.0   # assumed half width of the ultrasonic beam; the HC-SR04's is wider
+SCAN_STEP_M = 0.15     # longest lane step between two looks with the ultrasonic only
+BLIND_GAP_M = 0.24     # anything nearer than this (from the ultrasonic face) is in the camera blind zone: it then reports the
+                       # bottom row of the frame, 15-17 cm ahead of the nose on the car, not the distance
+CAM_STEP_M = 0.20      # ... with the camera, which sees the lane 35 cm ahead of the nose
+CAM_PANS = (-30.0, 30.0, 0.0)  # gimbal angles of one camera look (+ = left); ends facing ahead
+PASS_MARGIN_M = 0.08   # the tail clears the block's far face by this much before strafing back (pose drifts a few cm)
+WALL_ECHO_M = 0.16     # what the camera sees this close to where the pose puts the wall ahead is the wall
+PATH_MARGIN_M = 0.025  # an obstacle within this of the body's width counts as in the path
+CLEAR_MARGIN_M = 0.03  # a detour strafes until the path is clear by this much
+EDGE_PAN_DEG = 25.0    # the ultrasonic also looks this far to each side for the edges of the path (15 missed a block 3 cm in)
 
 
 def parse_args(argv: list[str] | None = None):
@@ -73,11 +86,22 @@ def parse_args(argv: list[str] | None = None):
     p.add_argument("--hug", action="store_true",
                    help="Mecanum wall-hugging lap: strafe into a lane --hug-gap-m from each wall, drive along it, "
                         "and turn only at corner spots far enough from both walls (ignores --route).")
-    p.add_argument("--hug-gap-m", type=float, default=0.08, help="Body side to wall gap in --hug lanes.")
+    p.add_argument("--hug-gap-m", type=float, default=None,
+                   help="Body side to wall gap in --hug lanes. Default: the lanes run through the corner turning "
+                        "spots, so the lap is a plain rectangle (about 14 cm). Smaller gaps hug the walls closer "
+                        "but step inward at every corner to turn."),
     p.add_argument("--no-detour", dest="detour", action="store_false",
                    help="In --hug lanes, stop at an obstacle instead of strafing around it.")
-    p.add_argument("--detour-approach-m", type=float, default=0.22,
-                   help="Stop this far (ultrasonic reading) in front of an obstacle before going around it.")
+    p.add_argument("--no-pose-filter", dest="pose_filter", action="store_false",
+                   help="In --hug, accept or ignore each tag fix with fixed jump limits instead of the pose filter.")
+    p.add_argument("--no-save-looks", dest="save_looks", action="store_false",
+                   help="Do not save every camera look (frames and pose) under debug-dir/looks for replay.")
+    p.add_argument("--no-camera-obstacles", dest="camera_obstacles", action="store_false",
+                   help="Find obstacles with the ultrasonic and IR only (the gimbal camera is the default).")
+    p.add_argument("--approach-cm", type=float, default=5.0,
+                   help="Close in to this far in front of the car's nose before strafing around an obstacle. "
+                        "The camera sees the floor only from 13 cm out, so the last stretch is driven by "
+                        "dead reckoning from the last look; 3 cm or less risks touching it.")
     p.add_argument("--detour-max-m", type=float, default=0.40,
                    help="Give up when the obstacle is still ahead after strafing this far off the lane.")
     p.add_argument("--lane-tol-m", type=float, default=0.02, help="Strafe back onto the lane beyond this.")
@@ -104,7 +128,8 @@ def parse_args(argv: list[str] | None = None):
                    help="Also stop on the front-camera corridor score (foam walls fill the fisheye, so off by default).")
     p.add_argument("--front-ir-gate-cm", type=float, default=18.0)
     p.add_argument("--blocked-wait-s", type=float, default=6.0)
-    p.add_argument("--min-battery-v", type=float, default=7.0)
+    p.add_argument("--min-battery-v", type=float, default=7.0,
+                   help="Only a warning below this: the run starts anyway.")
     p.add_argument("--no-ir", action="store_true")
     p.add_argument("--no-sonic", action="store_true")
     p.set_defaults(active_high=False)
@@ -138,14 +163,33 @@ class RouteFollower:
         self.motor = None
         self.servo = None
         self.home_pan, self.home_tilt = 90, 90
+        self.right_90_pan, self.left_90_pan = 180, 0
         self.pose: Pose2D | None = None
         self.trail: list[tuple[float, float, float]] = []
         self.stop_event = threading.Event()
         self.sonic_misses = 0
         self.travel = 0.0  # forward distance of the move in progress, not yet in the pose
+        self.turn_scale = {"left": 1.0, "right": 1.0}  # learned from tag fixes after turns (battery changes the rate)
+        self.last_turn: tuple[str, float, float] | None = None  # (kind, yaw before, commanded turn rad), for learning
+        self.closing_cm: float | None = None  # ultrasonic stop while closing in on an obstacle to go around
+        self.closing_ir_after: float | None = None  # while closing in: the front IR may light after this much travel
+        self.closed_in: float | None = None   # gap (m, from the ultrasonic face) expected after the last closing move
+        self.detouring = False                # True while going around an obstacle (tag headings are trusted)
+        self.use_filter = bool(args.hug and args.pose_filter)
+        self.kalman = PoseKalman(*(float(v) for v in self.arena["arena_size_m"]),
+                                 tuple(float(v) / 2.0 for v in self.car.get("body_m", [0.29, 0.18])),
+                                 float(self.motion.get("strafe_yaw_deg_per_cm", 0.6)))
+        self.scanner = None                   # camera obstacle finder (foot_cam.CameraScanner) or None
+        self.obstacles = ObstacleMap(self.arena["arena_size_m"])
+        self.last_views: list = []
+        self.look_no = 0
         self.front_risk = 0.0
         self.debug_dir = SERVER / args.debug_dir
         self.debug_dir.mkdir(parents=True, exist_ok=True)
+        if args.save_looks:  # a fresh run keeps only its own looks
+            import shutil
+
+            shutil.rmtree(self.debug_dir / "looks", ignore_errors=True)
         self.window = None
         self.writer = None
         self.record_path = Path(args.record) if args.record else None
@@ -182,10 +226,11 @@ class RouteFollower:
         from servo import Servo
 
         try:
-            from servo import load_gimbal_home
+            from servo import load_gimbal_home, load_left_90_pan, load_right_90_pan
 
             self.servo = Servo()  # applies gimbal_home.json: ultrasonic straight ahead
             self.home_pan, self.home_tilt = load_gimbal_home()
+            self.right_90_pan, self.left_90_pan = load_right_90_pan(self.home_pan), load_left_90_pan()
         except Exception as exc:
             print(f"WARNING gimbal: {exc}", flush=True)
         self.grabbers = open_grabbers(self.car, self.args.width, self.args.height, rear=not self.args.no_rear)
@@ -198,11 +243,26 @@ class RouteFollower:
         missing = [name for name, g in self.grabbers.items() if g.latest()[0] is None]
         if missing:
             raise Abort(f"cameras not ready: {missing}")
+        if self.args.hug and self.args.detour and self.args.camera_obstacles and self.servo is not None:
+            try:  # one USB camera (the gimbal's) at a time works; the side USB cameras stay closed
+                from foot_cam import CameraScanner, FootCamera, GimbalFeed
+
+                feed = GimbalFeed().start()
+                feed.wait_ready()
+                self.scanner = CameraScanner(FootCamera(self.car), feed)
+                print("obstacles: gimbal camera foot lines + ultrasonic + IR", flush=True)
+            except Exception as exc:  # noqa: BLE001
+                print(f"WARNING gimbal camera unavailable ({exc}); obstacles from the ultrasonic and IR only",
+                      flush=True)
         if self.args.arm:
             battery = read_battery_voltage()
-            if battery is None or battery < self.args.min_battery_v:
-                raise Abort(f"ARM refused: battery {battery}V < {self.args.min_battery_v}V")
-            print(f"ARMED battery={battery:.2f}V ({estimate_battery_percent(battery)}%). Starting in 3 s.", flush=True)
+            if battery is None:
+                print("WARNING battery voltage unreadable; starting anyway", flush=True)
+            else:
+                low = f" (below {self.args.min_battery_v}V: motors run slower than calibrated)" \
+                    if battery < self.args.min_battery_v else ""
+                print(f"ARMED battery={battery:.2f}V ({estimate_battery_percent(battery)}%){low}. "
+                      f"Starting in 3 s.", flush=True)
             for n in (3, 2, 1):
                 print(n, flush=True)
                 if self.stop_event.wait(1.0):
@@ -241,6 +301,21 @@ class RouteFollower:
                 self.motor.close()
             except Exception:
                 pass
+        if self.scanner is not None:
+            try:
+                self.scanner.close()
+            except Exception:
+                pass
+        if self.obstacles.blocks:
+            (self.debug_dir / "obstacles.json").write_text(
+                json.dumps(self.obstacles.as_dict(), indent=2) + "\n", encoding="utf-8")
+        if self.servo is not None and hasattr(self.servo, "release_gimbal"):
+            try:  # face ahead, then stop the pulses so the gimbal does not buzz after the run
+                self.servo.set_pan(self.home_pan)
+                time.sleep(0.4)
+                self.servo.release_gimbal()
+            except Exception:
+                pass
         if self.sensors is not None:
             self.sensors.close()
         for grabber in self.grabbers.values():
@@ -258,7 +333,10 @@ class RouteFollower:
         """Point the ultrasonic at `pan_deg` relative to straight ahead (positive = left) and read it."""
         if self.servo is None or self.sensors is None:
             return None
-        self.servo.set_servo_pwm("0", int(round(self.home_pan - pan_deg)))
+        from servo import servo_pan_for_bearing
+
+        # The servo is not 1:1 and differs left and right (gimbal_home.json right_90_pan / left_90_pan).
+        self.servo.set_pan(servo_pan_for_bearing(self.home_pan, self.right_90_pan, pan_deg, self.left_90_pan))
         if self.stop_event.wait(0.35):
             raise Abort("stopped")
         return self.sensors.read_sonic()
@@ -306,7 +384,7 @@ class RouteFollower:
                 print(f"    sweep {angle:+d}deg: {cm if cm is not None else '-'}cm", flush=True)
         finally:
             if self.servo is not None:
-                self.servo.set_servo_pwm("0", self.home_pan)
+                self.servo.set_pan(self.home_pan)
         return found
 
     def safety_reason(self) -> str | None:
@@ -318,10 +396,12 @@ class RouteFollower:
                 return "sonic_missing"
         else:
             self.sonic_misses = 0
-        self.travel = 0.0  # forward distance of the move in progress, not yet in the pose
-        if sonic is not None and sonic < self.args.stop_cm and not self.wall_echo(sonic):
+        stop_cm = self.args.stop_cm if self.closing_cm is None else min(self.args.stop_cm, self.closing_cm)
+        if sonic is not None and sonic < stop_cm and not self.wall_echo(sonic):
             return f"sonic_{sonic:.0f}cm"
         ir = self.sensors.read_ir()
+        if self.closing_ir_after is not None and self.travel >= self.closing_ir_after:
+            ir = {**ir, "front": 0, "front_left": 0, "front_right": 0}  # expected to light now: closing in on purpose
         near = sonic is None or sonic < self.args.front_ir_gate_cm
         if near and (ir["front"] or ir["front_left"] or ir["front_right"]) \
                 and not (sonic is not None and sonic > self.args.front_ir_gate_cm - 6.0):
@@ -385,6 +465,62 @@ class RouteFollower:
         return self.accept_fix(pose)
 
     def accept_fix(self, pose: Pose2D | None) -> Pose2D | None:
+        """Fuse a tag fix into the pose: the filter (--hug), or the fixed jump limits of `accept_fix_hard`."""
+        if not self.use_filter:
+            return self.accept_fix_hard(pose)
+        if pose is None:
+            return None
+        pairs = {(f.camera, f.tag_id) for f in pose.fixes}
+        nearest = min((f.distance for f in pose.fixes), default=9.9)
+        if self.pose is None or not self.kalman.ready:
+            self.kalman.start(pose.x, pose.y, pose.yaw, len(pairs), nearest)
+            self.jumps, self.jump_pose = 0, None
+            return pose
+        jump = math.hypot(pose.x - self.pose.x, pose.y - self.pose.y)
+        if self.lane_check and jump > 0.10 and self.clearance(self.pose.x, self.pose.y, self.pose.yaw) < 0.06:
+            print(f"  fix {pose.text()} jumped {jump * 100:.0f}cm while close to a wall; sweeping", flush=True)
+            self.sweep_correct()
+            return None
+        self.kalman.sync(self.pose.x, self.pose.y, self.pose.yaw)
+        before = self.pose
+        if self.kalman.update_tag(pose.x, pose.y, pose.yaw, len(pairs), nearest) == "outlier":
+            strong = len(pairs) >= 3 or any(f.distance < self.localizer.max_single_tag_m for f in pose.fixes)
+            last = self.jump_pose
+            same = last is not None and math.hypot(pose.x - last.x, pose.y - last.y) < self.args.max_jump_m
+            self.jumps = self.jumps + 1 if same else 1
+            self.jump_pose = pose
+            if not strong and (self.parking or self.jumps < 4):
+                sigma_xy, sigma_yaw = self.kalman.sigma()
+                print(f"  ignoring fix {pose.text()}: outside what the filter expects "
+                      f"(+-{sigma_xy * 100:.0f}cm, +-{sigma_yaw:.0f}deg)", flush=True)
+                return None
+            print("  far tags keep agreeing on a new pose; trusting them" if not strong
+                  else f"  strong fix {pose.text()} far from the expected pose; trusting it", flush=True)
+            self.kalman.start(pose.x, pose.y, pose.yaw, len(pairs), nearest)
+            fused = pose
+            if len(pairs) >= 2:
+                self.learn_turn(pose.yaw)
+        else:
+            fused = Pose2D(float(self.kalman.x[0]), float(self.kalman.x[1]), float(self.kalman.x[2]), pose.stamp,
+                           pose.fixes, pose.rms_px)
+            if len(pairs) >= 2:
+                self.learn_turn(pose.yaw)
+        self.jumps, self.jump_pose = 0, None
+        moved = math.hypot(fused.x - before.x, fused.y - before.y)
+        turned = abs(math.degrees(wrap_rad(fused.yaw - before.yaw)))
+        if moved > 0.05 or turned > 5.0:
+            print(f"  fix moved the pose {moved * 100:.0f}cm / {turned:.0f}deg -> {fused.text()}", flush=True)
+        # Two or more tags agreeing on a heading far from the lane are believed: after a corner the car can really be
+        # 25 deg off (a turn that went too far), and forcing the lane heading back drives it into the wall.
+        if self.lane_check and self.lane_yaw is not None and not self.detouring and len(pairs) < 2 \
+                and abs(wrap_rad(fused.yaw - self.lane_yaw)) > math.radians(25.0):
+            print(f"  fix {fused.text()}: heading {abs(math.degrees(wrap_rad(fused.yaw - self.lane_yaw))):.0f}deg "
+                  f"off the lane; keeping its position, not its heading", flush=True)
+            fused.yaw = before.yaw
+            self.kalman.x[2] = before.yaw
+        return fused
+
+    def accept_fix_hard(self, pose: Pose2D | None) -> Pose2D | None:
         """Drop a weak fix that jumps away from the dead-reckoned pose.
 
         Strong fixes (3+ tags, or one close tag) always pass. Weak ones pass only after
@@ -399,7 +535,7 @@ class RouteFollower:
             self.sweep_correct()
             return None
         if jump > self.args.max_jump_m or turn > self.args.max_jump_deg:
-            strong = len({(f.camera, f.tag_id) for f in pose.fixes}) >= 3 or \
+            strong = len({(f.camera, f.tag_id) for f in pose.fixes}) >= (2 if self.detouring else 3) or \
                 any(f.distance < self.localizer.max_single_tag_m for f in pose.fixes)
             if not strong:
                 last = self.jump_pose
@@ -412,7 +548,7 @@ class RouteFollower:
                     return None
                 print("  far tags keep agreeing on a new pose; trusting them", flush=True)
         self.jumps, self.jump_pose = 0, None
-        if self.lane_check and self.lane_yaw is not None \
+        if self.lane_check and self.lane_yaw is not None and not self.detouring \
                 and abs(wrap_rad(pose.yaw - self.lane_yaw)) > math.radians(25.0):
             # Far down a lane the tags still locate the car well but the heading flips; keep the
             # position and the lane heading instead of steering off at the bad yaw.
@@ -424,13 +560,21 @@ class RouteFollower:
 
     # ---- motion ---------------------------------------------------------
 
-    def _pwm(self, kind: str):
+    def _forward_pwm(self) -> tuple[int, int, int, int]:
+        """Left-front, left-rear, right-front, right-rear duties for driving straight (car_nav.json)."""
+        wheels = self.motion.get("forward_wheel_pwm")
+        if wheels and len(wheels) == 4:
+            return tuple(int(v) for v in wheels)
         fwd = int(self.motion["forward_pwm"])
+        return (fwd, fwd, fwd, fwd)
+
+    def _pwm(self, kind: str):
+        fwd = self._forward_pwm()
         turn = int(self.motion["turn_pwm"])
         side = int(self.motion.get("strafe_pwm", 1200)) * (-1 if self.strafe_flip else 1)
         return {
-            "forward": (fwd, fwd, fwd, fwd),
-            "reverse": (-fwd, -fwd, -fwd, -fwd),
+            "forward": fwd,
+            "reverse": tuple(-v for v in fwd),
             "left": (-turn, -turn, turn, turn),
             "right": (turn, turn, -turn, -turn),
             "strafe_left": (-side, side, side, -side),
@@ -439,6 +583,8 @@ class RouteFollower:
 
     def move(self, kind: str, duration: float) -> tuple[float, str | None]:
         """Timed motion; forward segments stop early on a safety reason."""
+        if kind not in ("left", "right"):
+            self.last_turn = None
         if self.motor is None:
             print(f"    would {kind} {duration:.2f}s", flush=True)
             if self.stop_event.wait(0.5):
@@ -465,9 +611,43 @@ class RouteFollower:
         self.dead_reckon(kind, elapsed)
         return elapsed, reason
 
+    def turn_rate(self, kind: str) -> float:
+        """Turn rate (deg/s) of "left" or "right": car_nav.json, scaled by what the last turns really did."""
+        return float(self.motion["turn_left_dps" if kind == "left" else "turn_right_dps"]) * self.turn_scale[kind]
+
+    def learn_turn(self, fix_yaw: float) -> None:
+        """A tag fix right after a turn says how far it really turned: correct the rate used for the next turns.
+
+        The calibrated rate is for one battery state; a fresh or a tired battery turns faster or slower. Only
+        turns of 25 deg or more teach (a small one is as noisy as the fix), and a rate moves half way to what
+        was seen, within 0.7 to 1.4 times the calibration.
+        """
+        if self.last_turn is None:
+            return
+        kind, before, commanded = self.last_turn
+        self.last_turn = None
+        if abs(commanded) < math.radians(25.0):
+            return
+        done = wrap_rad(fix_yaw - before)
+        ratio = done / commanded
+        if not 0.4 < ratio < 1.8:  # turned the wrong way or not at all: not this rate's fault
+            return
+        scale = min(max(self.turn_scale[kind] * (0.5 + 0.5 * ratio), 0.7), 1.4)
+        if abs(scale - self.turn_scale[kind]) >= 0.03:
+            print(f"    turn {kind}: asked {math.degrees(commanded):+.0f}deg, did {math.degrees(done):+.0f}deg; "
+                  f"rate now {self.turn_rate(kind) * scale / self.turn_scale[kind]:.0f}deg/s", flush=True)
+        self.turn_scale[kind] = scale
+
     def dead_reckon(self, kind: str, elapsed: float):
         if self.pose is None or elapsed <= 0.0:
             return
+        if self.use_filter and self.kalman.ready:
+            amount = {"forward": float(self.motion["forward_mps"]), "reverse": float(self.motion["forward_mps"]),
+                      "strafe_left": self.strafe_mps, "strafe_right": self.strafe_mps,
+                      "left": math.radians(self.turn_rate("left")),
+                      "right": math.radians(self.turn_rate("right"))}[kind] * elapsed
+            self.kalman.sync(self.pose.x, self.pose.y, self.pose.yaw)
+            self.kalman.predict(kind, amount)
         if kind in ("forward", "reverse"):
             step = float(self.motion["forward_mps"]) * elapsed * (1.0 if kind == "forward" else -1.0)
             # The car drifts left while driving straight; fold that into the expected heading.
@@ -480,9 +660,9 @@ class RouteFollower:
             self.pose.x -= side * math.sin(self.pose.yaw)
             self.pose.y += side * math.cos(self.pose.yaw)
         elif kind == "left":
-            self.pose.yaw = wrap_rad(self.pose.yaw + math.radians(float(self.motion["turn_left_dps"]) * elapsed))
+            self.pose.yaw = wrap_rad(self.pose.yaw + math.radians(self.turn_rate("left") * elapsed))
         elif kind == "right":
-            self.pose.yaw = wrap_rad(self.pose.yaw - math.radians(float(self.motion["turn_right_dps"]) * elapsed))
+            self.pose.yaw = wrap_rad(self.pose.yaw - math.radians(self.turn_rate("right") * elapsed))
         self.pose.fixes = []
 
     # ---- wall geometry ------------------------------------------------------
@@ -541,7 +721,7 @@ class RouteFollower:
         """Turn in place, first shuffling along the heading if a corner would hit a wall."""
         p, margin = self.pose, self.wall_limit()
         kind = "left" if err > 0 else "right"
-        rate = float(self.motion["turn_left_dps" if kind == "left" else "turn_right_dps"])
+        rate = self.turn_rate(kind)
         min_s = self.args.min_turn_s if min_s is None else min_s
         duration = min(max(math.degrees(abs(err)) / rate, min_s), self.args.max_turn_s)
         turn = math.copysign(math.radians(rate * duration), err)
@@ -571,6 +751,7 @@ class RouteFollower:
             shift, frac = best
             print(f"    only {math.degrees(abs(turn) * frac):.0f}deg of the turn is safe here", flush=True)
             duration *= frac
+        self.last_turn = (kind, self.pose.yaw, turn)
         step, side = shift
         if step:
             print(f"    wall too close to turn; {'forward' if step > 0 else 'reverse'} {abs(step) * 100:.0f}cm first",
@@ -580,6 +761,7 @@ class RouteFollower:
             print(f"    wall too close to turn; strafe {'left' if side > 0 else 'right'} {abs(side) * 100:.0f}cm first",
                   flush=True)
             self.move("strafe_left" if side > 0 else "strafe_right", abs(side) / self.strafe_mps)
+        self.last_turn = (kind, self.pose.yaw, turn)
         self.move(kind, duration)
 
     def search(self) -> Pose2D | None:
@@ -588,7 +770,7 @@ class RouteFollower:
         for i in range(steps):
             print(f"  search {i + 1}/{steps}: turning left {self.args.search_step_deg:.0f}deg", flush=True)
             if self.pose is None:
-                self.move("left", self.args.search_step_deg / float(self.motion["turn_left_dps"]))
+                self.move("left", self.args.search_step_deg / self.turn_rate("left"))
             else:
                 self.turn_by(math.radians(self.args.search_step_deg))
             fix = self.localize()
@@ -627,6 +809,7 @@ class RouteFollower:
             hx = int(round(margin + self.home.x * scale))
             hy = int(round(img_h - margin - self.home.y * scale))
             cv2.drawMarker(img, (hx, hy), (0, 140, 0), cv2.MARKER_TILTED_CROSS, 16, 2)
+        self.obstacles.draw(img)
         cv2.imwrite(str(self.debug_dir / "trajectory.png"), img)
         if self.window is not None:
             views = []
@@ -842,12 +1025,16 @@ class RouteFollower:
         return Pose2D(sum(f.x for f in fixes) / len(fixes), sum(f.y for f in fixes) / len(fixes), yaw,
                       fixes[-1].stamp, fixes[-1].fixes, fixes[-1].rms_px)
 
-    def strafe(self, left: float) -> bool:
-        """Mecanum sideways move by `left` m (negative = right); learns the strafe speed from the next fix."""
+    def strafe(self, left: float, ahead_cap: bool = True) -> bool:
+        """Mecanum sideways move by `left` m (negative = right); learns the strafe speed from the next fix.
+
+        `ahead_cap=False` for going around an obstacle: the ultrasonic then reads the obstacle itself,
+        right in front, and the cap below would forbid any strafe at all.
+        """
         side = math.copysign(min(abs(left), 0.06), left)
         # Strafing along the lane swings the nose or the tail sideways into a wall the pose can
         # easily underestimate, so cap that direction with the ultrasonic reading.
-        if self.lane_yaw is not None:
+        if self.lane_yaw is not None and ahead_cap:
             along = abs(math.cos(wrap_rad(self.pose.yaw - self.lane_yaw)))
             if along > 0.7:
                 sonic = self.sensors.read_sonic() if self.sensors is not None else None
@@ -901,21 +1088,159 @@ class RouteFollower:
         """Distance from (x, y) along `angle` to the arena wall it points at."""
         return self.wall_hit(x, y, angle)[0]
 
-    def obstacle_ahead(self, reason: str | None = None) -> float | None:
-        """Gap (m, from the ultrasonic face) to something ahead that is not the wall, or None.
+    def aim(self, pan_deg: float):
+        """Turn the gimbal to `pan_deg` (+ = left) through its calibrated angles and wait until it is there."""
+        from servo import servo_pan_for_bearing
+
+        self.servo.set_pan(servo_pan_for_bearing(self.home_pan, self.right_90_pan, pan_deg, self.left_90_pan))
+        if self.stop_event.wait(0.4):
+            raise Abort("stopped")
+
+    def look_around(self, pans=CAM_PANS) -> tuple[np.ndarray, np.ndarray]:
+        """One camera look from where the car stands: (obstacle points, wall points), car frame.
+
+        The gimbal turns to each angle, the foot line of the foam is found in a fresh frame and put on
+        the floor (foot_cam.py). Points on the arena walls are split off (the pose says where they are);
+        the rest go into the obstacle map, which draw_map shows.
+        """
+        views = self.scanner.scan(self.aim, pans)
+        parts = [v.points[~np.isnan(v.points[:, 0])] for v in views] + [v.close for v in views if len(v.close)]
+        points = np.vstack(parts) if parts else np.zeros((0, 2))
+        obstacle, wall = split_walls(points, self.pose, self.arena["arena_size_m"])
+        for block in self.obstacles.add(obstacle, wall, self.pose):
+            if block["hits"] == 1:
+                print(f"    new obstacle {self.obstacles.describe(block)} (pose {self.pose.text()})", flush=True)
+        self.last_views = views
+        self.save_look(views)
+        self.log_look(views)
+        return obstacle, wall
+
+    def log_look(self, views) -> None:
+        """Every look kept for replay: the frames, and the pose they were taken at (debug_dir/looks)."""
+        if not self.args.save_looks or not any(v.frame is not None for v in views):
+            return
+        self.look_no += 1
+        folder = self.debug_dir / "looks"
+        folder.mkdir(exist_ok=True)
+        for v in views:
+            if v.frame is not None:
+                cv2.imwrite(str(folder / f"{self.look_no:03d}_pan{v.pan:+03.0f}.jpg"), v.frame)
+        p = self.pose
+        with (folder / "looks.jsonl").open("a", encoding="utf-8") as f:
+            f.write(json.dumps({"n": self.look_no, "pose": [round(p.x, 4), round(p.y, 4), round(math.degrees(p.yaw), 2)],
+                                "pans": [v.pan for v in views], "time": time.strftime("%H:%M:%S")}) + "\n")
+
+    def save_look(self, views) -> None:
+        """The last look's frames with the foot lines on them: debug_dir/last_look.jpg."""
+        frames = [v for v in views if v.frame is not None]
+        if not frames or not hasattr(self.scanner, "cam"):
+            return
+        tiles = []
+        for v in frames:
+            tile = cv2.resize(self.scanner.cam.draw(v), (320, 240))
+            cv2.putText(tile, f"pan {v.pan:+.0f}", (6, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+            tiles.append(tile)
+        cv2.imwrite(str(self.debug_dir / "last_look.jpg"), np.hstack(tiles))
+
+    def camera_gap(self, reason: str | None = None, exclude: np.ndarray | None = None) -> float | None:
+        """Gap (m, from the ultrasonic face) to the nearest thing in the car's path that is not the wall.
+
+        The camera looks at the path ahead (obstacle_map.path_gap: the body's width plus PATH_MARGIN_M,
+        from the nose on); the ultrasonic straight ahead and a front IR stop count too. The pose says
+        where the wall ahead is: what the camera sees there is the wall, whatever the filter said.
+        """
+        if self.sensors is None or self.pose is None:
+            return None
+        nose, half = self.body_half[0], self.body_half[1] + PATH_MARGIN_M
+        obstacle, _wall = self.look_around()
+        if exclude is not None and len(exclude) and len(obstacle):
+            # the block being gone around is still beside-ahead of the car, only a few cm clear of its path
+            world = to_world(obstacle, self.pose)
+            near = np.hypot(world[:, None, 0] - exclude[None, :, 0], world[:, None, 1] - exclude[None, :, 1]).min(axis=1)
+            obstacle = obstacle[near > 0.10]
+        ahead = path_gap(obstacle, nose, half)
+        gap = None if ahead is None else ahead + (nose - SONIC_AHEAD_M)
+        readings = [r for r in (self.sensors.read_sonic() for _ in range(3)) if r is not None]
+        if readings:
+            sonic = st.median(readings) / 100.0
+            gap = sonic if gap is None else min(gap, sonic)
+        if reason == "ir_front":
+            gap = min(gap if gap is not None else 1.0, 0.08)
+        if gap is not None and self.wall_ahead() - gap <= WALL_ECHO_M:
+            gap = None  # the wall ahead; the pose is off by up to this much after a stretch without tags
+        return gap
+
+    def beyond_spot(self, gap: float | None, target) -> bool:
+        """True when the obstacle `gap` ahead (from the ultrasonic face) lies past `target`: the body fits at it."""
+        if gap is None:
+            return False
+        p = self.pose
+        ahead = (target[0] - p.x) * math.cos(p.yaw) + (target[1] - p.y) * math.sin(p.yaw)
+        return gap + SONIC_AHEAD_M - self.body_half[0] > ahead + 0.02
+
+    def snap_to_wall(self):
+        """At a lane end the wall is dead ahead, and the ultrasonic reads the true distance to it.
+
+        Dead reckoning drifts along the lane (5 % of the distance, and tags are often too far to fix it);
+        the wall does not move. Heading square to a wall and a reading within 30 cm that is within 12 cm of
+        what the pose predicts: move the pose along the heading to agree with the ultrasonic.
+        """
+        if self.sensors is None or self.pose is None:
+            return
+        p = self.pose
+        if max(abs(math.cos(p.yaw)), abs(math.sin(p.yaw))) < 0.95:
+            return
+        readings = [r for r in (self.sensors.read_sonic() for _ in range(3)) if r is not None]
+        if not readings:
+            return
+        measured = st.median(readings) / 100.0
+        err = self.wall_ahead() - measured
+        if measured > 0.30 or abs(err) > 0.12:
+            return
+        if self.use_filter and self.kalman.ready:
+            self.kalman.sync(p.x, p.y, p.yaw)
+            if self.kalman.update_wall(SONIC_AHEAD_M, 0.0, measured):
+                moved = math.hypot(self.kalman.x[0] - p.x, self.kalman.x[1] - p.y)
+                p.x, p.y, p.yaw = (float(v) for v in self.kalman.x)
+                print(f"    wall {measured * 100:.0f}cm ahead; the filter moved the pose {moved * 100:.0f}cm -> "
+                      f"{p.text()}", flush=True)
+            return
+        p.x += err * math.cos(p.yaw)
+        p.y += err * math.sin(p.yaw)
+        print(f"    wall {measured * 100:.0f}cm ahead; pose moved {err * 100:+.0f}cm along the heading -> {p.text()}",
+              flush=True)
+
+    def obstacle_ahead(self, reason: str | None = None, edges: bool = True) -> float | None:
+        """Gap (m, from the ultrasonic face) to something in the car's path that is not the wall, or None.
 
         The pose says where the wall ahead should be; a reading 10 cm or more short of it is an
-        obstacle. A slanted block can bounce the beam away, so a front IR stop counts as one 8 cm off.
+        obstacle. The beam straight ahead misses a block that covers only the edge of the path (a
+        block standing out from the wall reaches only the wall-side 6 cm of the lane), and the corner
+        IR does not see dark foam, so with `edges` the ultrasonic also looks EDGE_PAN_DEG to each side: a
+        return inside the body's width (plus 2 cm) counts. A slanted block can bounce the beam away,
+        so a front IR stop counts as one 8 cm off.
         """
+        if self.scanner is not None:
+            return self.camera_gap(reason)
         if self.sensors is None or self.pose is None:
             return None
         readings = [r for r in (self.sensors.read_sonic() for _ in range(3)) if r is not None]
         gap = st.median(readings) / 100.0 if readings else None
         if reason == "ir_front":
             gap = min(gap if gap is not None else 1.0, 0.08)
-        if gap is None:
-            return None
-        return gap if self.wall_ahead() - gap > 0.10 else None
+        if gap is not None and self.wall_ahead() - gap <= 0.10:
+            gap = None  # the wall ahead (the IR also lights at the end of every lane)
+        if edges and self.servo is not None:
+            for pan in (EDGE_PAN_DEG, -EDGE_PAN_DEG):
+                reading, wall = self.side_range(pan)
+                if reading is None or abs(reading - wall) < 0.06:
+                    continue  # nothing, or the wall that beam points at
+                reach = SONIC_ARM_M + reading
+                side = reach * math.sin(math.radians(EDGE_PAN_DEG))
+                if side <= self.body_half[1] + 0.02:
+                    edge_gap = SONIC_PIVOT_M + reach * math.cos(math.radians(pan)) - SONIC_AHEAD_M
+                    gap = edge_gap if gap is None else min(gap, edge_gap)
+        return gap
 
     def face(self, yaw: float, tol_deg: float = 6.0):
         err = wrap_rad(yaw - self.pose.yaw)
@@ -928,7 +1253,7 @@ class RouteFollower:
             cm = self.look(pan)
         finally:
             if self.servo is not None:
-                self.servo.set_servo_pwm("0", self.home_pan)
+                self.servo.set_pan(self.home_pan)
                 if self.stop_event.wait(0.35):  # facing ahead again before anything drives
                     raise Abort("stopped")
         p, a = self.pose, self.pose.yaw + math.radians(pan)
@@ -936,7 +1261,41 @@ class RouteFollower:
         oy = p.y + SONIC_PIVOT_M * math.sin(p.yaw) + SONIC_ARM_M * math.sin(a)
         return (None if cm is None else cm / 100.0), self.wall_distance(ox, oy, a)
 
+    def outer_corridor(self, out: float) -> float | None:
+        """How far the car can drive ahead before its outer side meets something, or None if nothing.
+
+        Neither the forward ultrasonic (centre line) nor the corner IR (7 cm out, 8 cm range) covers the
+        last few cm of the body's outer side, where a neighbouring wall's block can stand. The ultrasonic
+        turned 15 and 30 deg to that side does: a return within the body width (plus 3 cm) on that side
+        is in the path.
+        """
+        limit = None
+        for pan in (15.0 * out, 30.0 * out):
+            reading, _wall = self.side_range(pan)
+            if reading is None:
+                continue
+            reach = SONIC_ARM_M + reading
+            ahead = SONIC_PIVOT_M + reach * math.cos(math.radians(pan))
+            side = reach * math.sin(math.radians(abs(pan)))
+            if side <= self.body_half[1] + 0.03:
+                room = max(ahead - self.body_half[0] - 0.02, 0.0)
+                limit = room if limit is None else min(limit, room)
+        return limit
+
     def detour(self, target: tuple[float, float, float], gap: float):
+        """Go around an obstacle (see `_detour`); tag headings are trusted meanwhile.
+
+        A mecanum strafe turns the car a little (the wheels are not equally strong). The lane rule that
+        refuses a tag heading far from the lane is there for far tags that flip; here the car really
+        can be 25 deg off after a long strafe, and strafing on at the lane heading drives it diagonally.
+        """
+        self.detouring = True
+        try:
+            self._detour(target, gap)
+        finally:
+            self.detouring = False
+
+    def _detour(self, target: tuple[float, float, float], gap: float):
         """Go around an obstacle in a --hug lane with mecanum strafes, keeping the lane heading.
 
         1. Strafe toward the arena middle until the ultrasonic no longer sees it, then half the body
@@ -975,18 +1334,30 @@ class RouteFollower:
                 if side_blocked():
                     print(f"    {side_name} IR lit; staying {off_lane() * 100:.0f}cm off the lane", flush=True)
                     return
-                if not self.strafe(out * math.copysign(min(abs(left), 0.06), left)):
+                # Short steps: an overshoot here swings the body further into the middle of the arena.
+                if not self.strafe(out * math.copysign(min(abs(left), 0.03), left), ahead_cap=False):
                     raise Abort("detour: a wall blocks the strafe")
                 self.record()
                 self.save_map()
 
+        passing = np.zeros((0, 2))  # world points of the block(s) this detour goes around
+
         def forward_to(goal: float) -> bool:
             """Drive along the lane to `goal`; False when a sensor or wall stopped it short."""
             for _ in range(8):
-                self.face(yaw, 10.0)
+                self.face(yaw, 3.0)  # 10 deg over a 50 cm pass is 9 cm sideways
                 step = self.safe_step(min(self.args.max_segment_m, goal - along()))
                 if step < 0.01:
                     break
+                if self.scanner is not None:
+                    # Out beside the obstacle the car is no longer on its lane: look before each step, another
+                    # block (e.g. one standing out from the next wall) may be in the way of the shifted path.
+                    ahead_gap = self.camera_gap(exclude=passing)
+                    if ahead_gap is not None:
+                        step = min(step, ahead_gap - 0.12, CAM_STEP_M)
+                        if step < 0.02:
+                            print(f"    another obstacle {ahead_gap * 100:.0f}cm ahead while passing; stopping", flush=True)
+                            break
                 _elapsed, reason = self.move("forward", step / float(self.motion["forward_mps"]))
                 self.refresh_pose(0, full_turn=False)
                 self.record()
@@ -996,32 +1367,79 @@ class RouteFollower:
                     break
             return along() >= goal - 0.02
 
-        # 1. Out until the beam is clear, then half a body width more.
+        # 0. Right up against it a strafe would scrape the nose along it: back off to 6 cm first.
+        if gap < 0.05:
+            back = self.safe_step(-(0.06 - gap))
+            if back < -0.005:
+                print(f"    only {gap * 100:.0f}cm in front; reversing {-back * 100:.0f}cm first", flush=True)
+                self.move("reverse", -back / float(self.motion["forward_mps"]))
+                gap -= back
+
         start, detected = off_lane(), along()
-        ahead = gap
-        while True:
-            if off_lane() - start > self.args.detour_max_m:
-                raise Abort(f"detour: obstacle still ahead {self.args.detour_max_m * 100:.0f}cm off the lane")
-            if side_blocked():
-                raise Abort(f"detour: something on the {side_name} side too; no way around")
-            self.face(yaw)
-            # Once the beam starts to slip off the obstacle's edge, smaller steps: every cm out here
-            # is a cm the car swings into the middle of the arena.
-            if not self.strafe(out * (0.04 if ahead is None or ahead < gap + 0.03 else 0.03)):
-                raise Abort("detour: a wall blocks the strafe")
-            self.record()
-            self.save_map()
-            ahead = self.obstacle_ahead()
-            print(f"    {(off_lane() - start) * 100:.0f}cm out; ahead "
-                  f"{'clear' if ahead is None else f'{ahead * 100:.0f}cm'}", flush=True)
-            if ahead is None or ahead > gap + 0.15:
-                break
-        # Clear means the beam edge (about 3 cm off the centre line here) has left the obstacle.
-        need = off_lane() + self.body_half[1] + 0.01
-        sidestep(need)
-        if off_lane() < need - 0.015:
-            raise Abort(f"detour: only {off_lane() * 100:.0f}cm of the {need * 100:.0f}cm needed beside the "
-                        "obstacle is free; no way around")
+        if self.scanner is not None:
+            # 1. The camera gives the obstacle's edge: strafe exactly as far as the body needs to clear it by
+            # CLEAR_MARGIN_M, look again, and repeat if the first estimate was short.
+            nose, half = self.body_half[0], self.body_half[1]
+            for attempt in range(6):
+                self.face(yaw, 2.0)  # a strafe turns the car; the path ahead is judged square to the lane
+                obstacle, _wall = self.look_around()
+                if attempt == 0:
+                    for block in self.obstacles.blocks:
+                        if block.get("last_scan") == self.obstacles.scans:
+                            print(f"    {self.obstacles.describe(block, target)}", flush=True)
+                            passing = np.vstack([passing, block["points"]])
+                need = shift_to_clear(obstacle, out, nose, half, CLEAR_MARGIN_M)
+                if need <= 0.012:
+                    break
+                if off_lane() - start + need > self.args.detour_max_m:
+                    raise Abort(f"detour: the path is blocked up to {(off_lane() - start + need) * 100:.0f}cm "
+                                f"off the lane; no way around")
+                # The strafe sweeps the side of the car; the camera looks ahead. Ask the ultrasonic, turned to
+                # the side the car is about to move to, whether something stands there.
+                reading, wall = self.side_range(90.0 * out)
+                room = reading + SONIC_ARM_M if reading is not None else None  # from the car's centre line
+                if room is not None and reading < wall - 0.08 and room < half + need + 0.05:
+                    raise Abort(f"detour: something {room * 100:.0f}cm to the {side_name}, where the strafe of "
+                                f"{need * 100:.0f}cm would go; no way around")
+                print(f"    path blocked; strafing {need * 100:.0f}cm {side_name}", flush=True)
+                goal = off_lane() + need
+                while goal - off_lane() > 0.01:
+                    if side_blocked():
+                        raise Abort(f"detour: something on the {side_name} side too; no way around")
+                    self.face(yaw, 2.0)
+                    if not self.strafe(out * min(goal - off_lane(), 0.04), ahead_cap=False):
+                        raise Abort("detour: a wall blocks the strafe")
+                    self.record()
+                    self.save_map()
+            else:
+                raise Abort("detour: the camera still sees the path blocked after 6 looks")
+            print(f"    path clear, {(off_lane() - start) * 100:.0f}cm off the lane", flush=True)
+        else:
+            ahead = gap
+            while True:
+                if off_lane() - start > self.args.detour_max_m:
+                    raise Abort(f"detour: obstacle still ahead {self.args.detour_max_m * 100:.0f}cm off the lane")
+                if side_blocked():
+                    raise Abort(f"detour: something on the {side_name} side too; no way around")
+                self.face(yaw)
+                # Once the beam starts to slip off the obstacle's edge, smaller steps: every cm out here
+                # is a cm the car swings into the middle of the arena.
+                if not self.strafe(out * (0.04 if ahead is None or ahead < gap + 0.03 else 0.03), ahead_cap=False):
+                    raise Abort("detour: a wall blocks the strafe")
+                self.record()
+                self.save_map()
+                ahead = self.obstacle_ahead(edges=False)  # the side beams would keep finding this very block
+                print(f"    {(off_lane() - start) * 100:.0f}cm out; ahead "
+                      f"{'clear' if ahead is None else f'{ahead * 100:.0f}cm'}", flush=True)
+                if ahead is None or ahead > gap + 0.15:
+                    break
+            # Clear means the edge of the beam has left the obstacle, so its edge is at least that far off the
+            # centre line. SONIC_HALF_DEG is narrower than the real cone, which only ever makes this cautious.
+            need = off_lane() - gap * math.tan(math.radians(SONIC_HALF_DEG)) + self.body_half[1] + 0.02
+            sidestep(need)
+            if off_lane() < need - 0.015:
+                raise Abort(f"detour: only {off_lane() * 100:.0f}cm of the {need * 100:.0f}cm needed beside the "
+                            "obstacle is free; no way around")
 
         # 2. Past it. `near` is its near face along the lane; the side beam is SONIC_PIVOT_M ahead of the
         # centre and a few cm wide, so "clear" there puts the far face at most 4 cm behind the beam.
@@ -1043,23 +1461,32 @@ class RouteFollower:
         if far is None:
             far = near + BLOCK_LONG_M
             print(f"    could not see its far side; assuming {BLOCK_LONG_M * 100:.0f}cm deep", flush=True)
-        clear = far + self.body_half[0] + 0.04
+        clear = far + self.body_half[0] + PASS_MARGIN_M
+        room = self.outer_corridor(out) if self.scanner is None else None  # the camera covers it
+        if room is not None and clear - along() > room:
+            raise Abort(f"detour: something {room * 100:.0f}cm ahead on the {side_name} edge of the path; "
+                        f"passing needs {(clear - along()) * 100:.0f}cm")
         if not forward_to(clear):
             raise Abort(f"detour: stopped {(clear - along()) * 100:.0f}cm short of clearing the obstacle; "
                         "strafing back would hit it")
 
-        # 3. Back onto the lane, without turning; a side IR lighting up while still well off the
-        # lane is the obstacle, so go a little further first.
+        # 3. Back onto the lane, whichever side of it the car is on now; a side IR lighting up while still
+        # well off the lane is the obstacle, so go a little further first.
         ir_keys = ("wheel_right_front", "wheel_right_rear") if out > 0 else ("wheel_left_front", "wheel_left_rear")
-        for _ in range(12):
-            if off_lane() <= self.args.lane_tol_m:
+        for _ in range(14):
+            err = off_lane()  # + = toward the arena middle
+            if abs(err) <= self.args.lane_tol_m:
                 break
-            if off_lane() > 0.10 and self.sensors is not None and any(self.sensors.read_ir().get(k) for k in ir_keys):
+            p = self.pose
+            wall_gap = self.wall_distance(p.x, p.y, p.yaw - out * math.pi / 2.0) - self.body_half[1]  # body edge to wall
+            if err > 0.10 and wall_gap > 0.12 and self.sensors is not None \
+                    and any(self.sensors.read_ir().get(k) for k in ir_keys):
                 print(f"    {wall_side} IR sees the obstacle; forward 6cm before strafing back", flush=True)
                 if not forward_to(along() + 0.06):
                     raise Abort("detour: obstacle beside the car and no room to go further")
                 continue
-            if not self.strafe(-out * min(off_lane(), 0.06)):
+            self.face(yaw, 2.0)
+            if not self.strafe(-out * max(min(err, 0.06), -0.06), ahead_cap=False):
                 break
             self.record()
             self.save_map()
@@ -1113,7 +1540,10 @@ class RouteFollower:
             bearing = wrap_rad(math.atan2(dy, dx) - p.yaw)
             in_lane = abs(dyaw) <= math.radians(20.0) and ahead > 0 and abs(left) <= 0.5 * ahead
             self.lane_check = in_lane
-            if not near and not in_lane:
+            # Heading already right and the spot close: strafe and drive to it rather than turning beside
+            # the walls (the start, joining the first lane from home, is like this).
+            square = abs(dyaw) <= math.radians(20.0) and math.hypot(ahead, left) < 0.30
+            if not near and not in_lane and not square:
                 # Far and not already lined up along the target heading: face the spot and drive there.
                 if abs(bearing) > math.radians(self.args.align_deg):
                     self.turn_by(bearing)
@@ -1136,27 +1566,62 @@ class RouteFollower:
                 step = self.safe_step(max(-self.args.max_segment_m, min(self.args.max_segment_m, ahead)))
                 detour = self.args.hug and self.args.detour and not parking and step > 0
                 if detour:
+                    # The side looks see the edges of the path only up to ~24 cm ahead, and the beam straight
+                    # ahead misses a block that covers just an edge: never drive past what was looked at.
+                    step = min(step, CAM_STEP_M if self.scanner is not None else SCAN_STEP_M)
                     gap = self.obstacle_ahead()
+                    short = self.beyond_spot(gap, target)
+                    if short:
+                        gap = None  # the spot this move goes to is short of it: no need to get past it
+                    approach = self.args.approach_cm / 100.0 + (self.body_half[0] - SONIC_AHEAD_M)
                     if gap is not None:
-                        if gap <= self.args.detour_approach_m + 0.03:
-                            self.detour(target, gap)
+                        # After a closing move the obstacle is inside the camera's blind zone: it reports the
+                        # nearest floor it sees, not the distance. Believe the dead-reckoned gap instead, and
+                        # go around: closing in again on that report would drive into it.
+                        blind = self.scanner is not None and gap <= BLIND_GAP_M
+                        if gap <= approach + 0.03 or blind:
+                            # Seen only in the blind zone and never closed in on: the real gap is somewhere
+                            # between 0 and what is reported, so no closing in either; go around from here.
+                            true_gap = self.closed_in if (blind and self.closed_in is not None) else gap
+                            self.closed_in = None
+                            self.detour(target, true_gap)
                             continue
-                        step = min(step, gap - self.args.detour_approach_m)
-                        print(f"    obstacle {gap * 100:.0f}cm ahead; closing to "
-                              f"{self.args.detour_approach_m * 100:.0f}cm", flush=True)
+                        step = min(step, gap - approach)
+                        print(f"    obstacle {(gap + SONIC_AHEAD_M - self.body_half[0]) * 100:.0f}cm ahead of the nose; "
+                              f"closing to {self.args.approach_cm:.0f}cm", flush=True)
+                        self.closed_in = gap - step
+                    else:
+                        self.closed_in = None
                 if abs(step) < 0.01:
                     print("    wall reached; taking this as the spot", flush=True)
+                    if detour:
+                        self.snap_to_wall()
                     return False
                 kind = "forward" if step > 0 else "reverse"
-                _elapsed, reason = self.move(kind, abs(step) / float(self.motion["forward_mps"]))
+                if detour and (gap is not None or short):
+                    self.closing_cm = (approach - 0.03) * 100.0
+                    if gap is not None:
+                        self.closing_ir_after = max(step - 0.04, 0.0)
+                try:
+                    _elapsed, reason = self.move(kind, abs(step) / float(self.motion["forward_mps"]))
+                finally:
+                    self.closing_cm = None
+                    self.closing_ir_after = None
+                if reason:
+                    self.closed_in = None
                 if reason and detour:
                     gap = self.obstacle_ahead(reason)
+                    if self.beyond_spot(gap, target):
+                        # Stopped by what lies past the spot (not in the way of it): this is as close as we go.
+                        print(f"    obstacle past the spot ({reason}); taking this as the spot", flush=True)
+                        return False
                     if gap is not None:
                         self.detour(target, gap)
                         continue
                     if self.wall_ahead() < 0.20:
                         # Backing off the wall here could reverse into an obstacle just passed.
                         print(f"    wall ahead ({reason}); taking this as the spot", flush=True)
+                        self.snap_to_wall()
                         return False
                 if reason and blocked(reason):
                     return False
@@ -1197,8 +1662,9 @@ class RouteFollower:
         """
         w, h = (float(v) for v in self.arena["arena_size_m"])
         hl, hw = self.body_half
-        lane = hw + self.args.hug_gap_m
+        # A turn in place sweeps a circle of the half diagonal; `spot` keeps that circle off both walls.
         spot = math.hypot(hl, hw) + self.args.wall_margin_m + 0.02
+        lane = spot if self.args.hug_gap_m is None else hw + self.args.hug_gap_m
         walls = [
             (0.0, (spot, lane), (w - spot, lane), (w - spot, spot)),
             (90.0, (w - lane, spot), (w - lane, h - spot), (w - spot, h - spot)),
@@ -1221,7 +1687,9 @@ class RouteFollower:
             return math.hypot(q[0] - anchor.x, q[1] - anchor.y) + 0.1 * abs(wrap_rad(q[2] - anchor.yaw))
 
         k = min((i for i in range(n) if i % 4 in (0, 1)), key=lambda i: cost(poses[i]))
-        print(f"hug lane {self.args.hug_gap_m * 100:.0f}cm from the walls; starting at pose {k}", flush=True)
+        hw = self.body_half[1]
+        lane = abs(poses[0][1])  # the first lane runs along the y=0 wall
+        print(f"hug lane: body {(lane - hw) * 100:.0f}cm from the walls; starting at pose {k}", flush=True)
         while True:
             for j in range(n + 1):
                 i = (k + j) % n
