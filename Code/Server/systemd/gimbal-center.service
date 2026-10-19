@@ -1,0 +1,16 @@
+# Point the gimbal straight ahead (gimbal_home.json) at every boot.
+# Install:
+#   sudo cp systemd/gimbal-center.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now gimbal-center.service
+[Unit]
+Description=Freenove 4WD: gimbal straight ahead at boot
+After=multi-user.target
+
+[Service]
+Type=oneshot
+User=pi
+WorkingDirectory=/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server
+ExecStart=/usr/bin/python3 /home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/gimbal_center.py
+
+[Install]
+WantedBy=multi-user.target

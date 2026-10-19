@@ -3,14 +3,17 @@ import warnings
 import time
 
 class Ultrasonic:
-    def __init__(self, trigger_pin: int = 27, echo_pin: int = 22, max_distance: float = 3.0):
+    def __init__(self, trigger_pin: int = 27, echo_pin: int = 22, max_distance: float = 3.0, queue_len: int = 9):
+        # gpiozero reports the median of the last `queue_len` echoes, sampled in the background: 9 spans
+        # most of a second, so a reading lags a turn of the gimbal (or the car closing in) by ~0.4 s.
         # Initialize the Ultrasonic class and set up the distance sensor.
         warnings.filterwarnings("ignore", category = DistanceSensorNoEcho)
         warnings.filterwarnings("ignore", category = PWMSoftwareFallback)  # Ignore PWM software fallback warnings
         self.trigger_pin = trigger_pin  # Set the trigger pin number
         self.echo_pin = echo_pin        # Set the echo pin number
         self.max_distance = max_distance  # Set the maximum distance
-        self.sensor = DistanceSensor(echo=self.echo_pin, trigger=self.trigger_pin, max_distance=self.max_distance)  # Initialize the distance sensor
+        self.sensor = DistanceSensor(echo=self.echo_pin, trigger=self.trigger_pin, max_distance=self.max_distance,
+                                     queue_len=queue_len)  # Initialize the distance sensor
 
     def __enter__(self):
         return self

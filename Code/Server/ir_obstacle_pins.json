@@ -1,0 +1,32 @@
+{
+  "notes": [
+    "六顆紅外避障模組 BCM GPIO（2026-10-14 實車對照）。",
+    "模組輸出 LOW = 有障礙（LED 亮）；程式讀取時 obstacle=1。",
+    "車頭只有左前、右前兩顆，沒有正中央第三顆；邏輯上的 front = 左前 OR 右前。",
+    "沒有朝車尾的紅外線。左後輪、右後輪都是朝外，和同側前輪一樣看側面。",
+    "2026-10-14 實測：六顆模組 LED 亮（obstacle=1）≈ 障礙物在 8 cm 以內；可調模組上的電位器改靈敏度。"
+  ],
+  "trigger_distance_cm": 8,
+  "pins": {
+    "front_left": 19,
+    "front_right": 16,
+    "wheel_left_front": 6,
+    "wheel_left_rear": 26,
+    "wheel_right_front": 12,
+    "wheel_right_rear": 20
+  },
+  "physical_labels_zh": {
+    "front_left": "車頭左前",
+    "front_right": "車頭右前",
+    "wheel_left_front": "左前輪",
+    "wheel_left_rear": "左後輪",
+    "wheel_right_front": "右前輪",
+    "wheel_right_rear": "右後輪"
+  },
+  "logic_aliases": {
+    "front": ["front_left", "front_right"],
+    "left": ["front_left", "wheel_left_front", "wheel_left_rear"],
+    "right": ["front_right", "wheel_right_front", "wheel_right_rear"],
+    "rear": []
+  }
+}

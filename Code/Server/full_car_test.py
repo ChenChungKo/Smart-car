@@ -965,7 +965,11 @@ def build_parser():
     parser.add_argument("--camera-warmup", type=float, default=2.0, help="Seconds to wait after opening each camera before discarding warmup frames.")
     parser.add_argument("--camera-warmup-frames", type=int, default=15, help="Number of preview frames to discard so auto-exposure can settle.")
     parser.add_argument("--camera-settle", type=float, default=1.0, help="Seconds to wait between closing one camera and opening the next.")
-    parser.add_argument("--obstacle-pins", default="26,20,19,16,6,12", help="Comma-separated BCM GPIO pins for extra infrared obstacle sensors.")
+    parser.add_argument(
+        "--obstacle-pins",
+        default="19,16,6,26,12,20",
+        help="Comma-separated BCM GPIO pins (see ir_obstacle_pins.json for positions).",
+    )
     parser.set_defaults(obstacle_active_high=False)
     parser.add_argument("--obstacle-active-high", action="store_true", help="Treat HIGH as obstacle detected.")
     parser.add_argument("--obstacle-active-low", action="store_false", dest="obstacle_active_high", help="Treat LOW as obstacle detected. This is the default.")

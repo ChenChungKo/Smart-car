@@ -7,3 +7,4 @@ vision_cruise_debug/
 # Simulator output (route_sim.py, Webots route_follow_webots).
 route_sim_debug/
 route_follow_webots_debug/
+lane_scan_debug/

@@ -5,6 +5,10 @@ from pathlib import Path
 from pca9685 import PCA9685
 
 HOME_PATH = Path(__file__).resolve().parent / "gimbal_home.json"
+# The SG90 stops a few degrees apart for the same pulse depending on the side it comes from. Every pan
+# move therefore ends coming from this many servo degrees to the left (smaller angles), so a saved
+# angle (gimbal_home.json) points the same way whenever it is used.
+PAN_APPROACH = 8
 
 
 def load_gimbal_home() -> tuple[int, int]:
@@ -19,13 +23,51 @@ def load_gimbal_home() -> tuple[int, int]:
     return max(0, min(180, pan)), max(0, min(180, tilt))
 
 
+def load_right_90_pan(home_pan: int = 76) -> int:
+    """Servo angle that points 90 degrees to the car's right. Defaults to a 1:1 map."""
+    try:
+        data = json.loads(HOME_PATH.read_text(encoding="utf-8"))
+        return max(0, min(180, int(data.get("right_90_pan", home_pan + 90))))
+    except Exception:
+        return max(0, min(180, home_pan + 90))
+
+
+def load_left_90_pan() -> int | None:
+    """Servo angle that points 90 degrees to the car's left, if it has been measured."""
+    try:
+        data = json.loads(HOME_PATH.read_text(encoding="utf-8"))
+        if "left_90_pan" not in data:
+            return None
+        return max(0, min(180, int(data["left_90_pan"])))
+    except Exception:
+        return None
+
+
+def servo_pan_for_bearing(home_pan: int, right_90_pan: int, pan_deg: float,
+                          left_90_pan: int | None = None) -> int:
+    """Servo angle for a heading relative to straight ahead. Positive pan_deg is left."""
+    if pan_deg >= 0 and left_90_pan is not None:
+        span = home_pan - left_90_pan
+    else:
+        span = right_90_pan - home_pan
+    if span == 0:
+        span = 90
+    angle = home_pan - float(pan_deg) * (span / 90.0)
+    return max(0, min(180, int(round(angle))))
+
+
 def save_gimbal_home(pan: int, tilt: int) -> Path:
     pan, tilt = max(0, min(180, int(pan))), max(0, min(180, int(tilt)))
-    payload = {
-        "pan": pan,
-        "tilt": tilt,
-        "notes": "Straight-ahead pose used at cruise start (servo 0 pan, servo 1 tilt).",
-    }
+    try:
+        payload = json.loads(HOME_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        payload = {}
+    payload["pan"] = pan
+    payload["tilt"] = tilt
+    payload.setdefault(
+        "notes",
+        "pan/tilt is straight ahead. right_90_pan looks 90 degrees to the car's right.",
+    )
     HOME_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     return HOME_PATH
 
@@ -52,9 +94,30 @@ class Servo:
 
     def apply_gimbal_home(self) -> tuple[int, int]:
         pan, tilt = load_gimbal_home()
-        self.set_servo_pwm("0", pan)
+        self.set_pan(pan)
         self.set_servo_pwm("1", tilt)
         return pan, tilt
+
+    def release_gimbal(self) -> None:
+        """Stop the pan/tilt pulses. Held, an SG90 keeps correcting and buzzes; the gears hold it in place."""
+        self.pwm_servo.set_pwm(8, 0, 0)
+        self.pwm_servo.set_pwm(9, 0, 0)
+
+    def set_pan(self, angle: int) -> None:
+        """Pan servo to `angle`, always arriving from the left (see PAN_APPROACH).
+
+        Turning right already arrives from the left; only a turn to the left (or an unknown start)
+        goes PAN_APPROACH past and comes back. The same angle again does nothing.
+        """
+        angle = int(angle)
+        last = getattr(self, "pan_now", None)
+        if last == angle:
+            return
+        if (last is None or angle < last) and angle - PAN_APPROACH >= 0:
+            self.set_servo_pwm("0", angle - PAN_APPROACH)
+            time.sleep(0.12)
+        self.set_servo_pwm("0", angle)
+        self.pan_now = angle
 
     def set_servo_pwm(self, channel: str, angle: int, error: int = 10) -> None:
         angle = int(angle)
