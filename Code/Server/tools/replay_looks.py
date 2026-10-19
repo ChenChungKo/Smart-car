@@ -46,8 +46,9 @@ for line in (folder / "looks.jsonl").read_text().splitlines():
 
 if not window:
     print("\nblocks at the end (seen at least twice):")
-    for b in omap.blocks:
-        if b["hits"] >= 2:
+    print("(drawn on the map:)")
+    for b in omap.drawn():
+        if True:
             o = np.array(b["outline"]) * 100
             print(f"  B{b['id']} hits {b['hits']}: outline x {o[:,0].min():.0f}~{o[:,0].max():.0f}, y {o[:,1].min():.0f}~{o[:,1].max():.0f} cm")
     print("  true: B1 x 65~75 y 0~20 | B2 x 120~140 y 65~75 | B3 x 65~75 y 120~140 | B4 x 0~20 y 65~75 (cm)")

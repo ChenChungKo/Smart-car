@@ -23,6 +23,7 @@ import numpy as np
 WALL_BAND_M = 0.07   # a foot this close to a wall is the wall (more for far feet, see `wall_band`)
 CAMERA_X_M = 0.10    # the gimbal camera, ahead of the car centre: far feet are less exact
 DEPTH_20_FROM_M = 0.125   # a face seen this far from the wall (95th percentile) is the end of a block standing out from it
+WALL_LIKE_M = 0.085   # foot points whose median is nearer a wall than this are taken for the wall, not for a block
 MAP_RANGE_M = 0.36   # only feet this near the camera make blocks: farther, a wall's foot is off by more than its band
 OUTSIDE_M = 0.04     # a foot this far beyond a wall is something outside the arena (people, a fridge)
 CLUSTER_GAP_M = 0.045
@@ -273,9 +274,15 @@ class ObstacleMap:
                      f"{abs(across) * 100:.0f} cm to the {'left' if across > 0 else 'right'} of the lane line")
         return text
 
+    def drawn(self, min_hits: int = 3) -> list[dict]:
+        """The blocks the map shows: seen near enough, enough times, and not just a wall's own foot line."""
+        return [b for b in self.blocks if b.get("near_hits", 0) >= min_hits and "outline" in b
+                # a line a few cm off a wall is that wall's foot, seen from a pose that is a few cm off
+                and float(np.median(inner_distance(b["draw_points"], (self.w, self.h)))) >= WALL_LIKE_M]
+
     def as_dict(self) -> list[dict]:
         return [{"id": b["id"], "hits": b["hits"], "centre_m": [round(float(v), 3) for v in b["centre"]],
-                 "outline_m": np.round(b["outline"], 3).tolist()} for b in self.blocks if "outline" in b]
+                 "outline_m": np.round(b["outline"], 3).tolist()} for b in self.drawn()]
 
     # ---- drawing ----------------------------------------------------------
 
@@ -292,8 +299,9 @@ class ObstacleMap:
             for p in self.scan_wall:
                 cv2.circle(img, px(p), 1, (170, 170, 170), -1)
         shown = 0
+        shown_blocks = self.drawn(min_hits)
         for block in self.blocks:
-            if block.get("near_hits", 0) < min_hits or "outline" not in block:
+            if block not in shown_blocks:
                 continue  # seen once: far feet and wall edges look like blocks; wait for a second look
             shown += 1  # numbered by what is drawn: ids of one-look false blocks are not shown, so no gaps
             fresh = block.get("last_scan", 0) >= self.scans - 1
