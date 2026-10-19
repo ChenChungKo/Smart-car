@@ -12,6 +12,9 @@
     "routes.perimeter：沿四面牆、車身中心離牆 24 cm（車側離牆約 15 cm）逆時針一圈；四角斜切 15 cm。車角到車心約 17 cm，原地轉向需要這個距離，再貼近就轉不過去。跑這條建議加 --stop-cm 8 --arrive-m 0.06。",
     "default_route：rect（完整四邊形，逆時針四個角）。loop 與 rect 相同。貼牆請用 --hug，較易在右牆/定位差時擦撞。"
   ],
+  "obstacle_block_notes": "場地內泡棉障礙物都是 20x15x10 cm，擺成 20x10 cm 底面（高 15 cm）。perceive_map.py 用 obstacle_block_m 把鏡頭看到的面補成整塊。",
+  "obstacle_block_m": [0.20, 0.10],
+  "obstacle_block_height_m": 0.15,
   "default_route": "rect",
   "arena_size_m": [1.40, 1.40],
   "tag_dictionary": "DICT_4X4_50",

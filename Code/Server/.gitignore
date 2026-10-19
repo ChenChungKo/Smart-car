@@ -3,3 +3,4 @@
 models/*.onnx
 models/*.pt
 vision_cruise_debug/
+perceive_debug/

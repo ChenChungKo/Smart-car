@@ -11,8 +11,13 @@ No sideways shuffle, no separate gap hunter, no second planner. The live map
 is the only occupancy the route uses. A forward move still stops on ultrasonic
 or IR. Dry-run unless --arm is given.
 
+With --perceive the look is perceive_map.py's: the gimbal camera finds the foam blocks, the
+ultrasonic confirms them, they are kept in a block map across stops (and runs), and A* plans
+around the blocks instead of the ultrasonic-only live map.
+
 Dry-run unless --arm is given.
     python3 route_follow.py --route loop            # decisions only
+    python3 route_follow.py --route rect --perceive --new-map --arm   # camera blocks, fresh map
     python3 route_follow.py --route loop --arm      # drive
     python3 route_follow.py --calibrate-motion --arm
 """
@@ -22,8 +27,10 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import signal
 import statistics as st
+import sys
 import threading
 import time
 from pathlib import Path
@@ -149,6 +156,14 @@ def parse_args():
     p.add_argument("--no-sonic", action="store_true")
     p.set_defaults(active_high=False)
     p.add_argument("--ir-active-high", action="store_true", dest="active_high")
+    p.add_argument("--perceive", action="store_true",
+                   help="Plan around the blocks the gimbal camera finds (perceive_map.py), kept in a block map.")
+    p.add_argument("--new-map", action="store_true", help="With --perceive: forget the remembered blocks first.")
+    p.add_argument("--sweep-every-m", type=float, default=0.40,
+                   help="With --perceive: drive on the last sweep's map for this far before sweeping again "
+                        "(the gimbal camera is sure out to 60 cm); a safety stop sweeps at once.")
+    p.add_argument("--perceive-pans", default="-90,-60,-30,0,30,60,90",
+                   help="With --perceive: gimbal angles of each stop's sweep (deg, positive = left).")
     p.add_argument("--debug-dir", default="route_follow_debug")
     p.add_argument("--no-window", action="store_true", help="Do not open the live trajectory window.")
     p.add_argument("--record", nargs="?", const="route_follow_debug/run.mp4", default=None,
@@ -195,7 +210,11 @@ class RouteFollower:
         self.window = None
         self.writer = None
         self.record_path = Path(args.record) if args.record else None
-        if not args.no_window:
+        # Qt aborts the whole process (not a cv2.error) when there is no display, e.g. in an SSH or
+        # VS Code terminal, so the window is only tried when a display is there.
+        if not args.no_window and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+            print("no display (DISPLAY is not set); running without the trajectory window", flush=True)
+        elif not args.no_window:
             try:
                 cv2.namedWindow("route", cv2.WINDOW_NORMAL)
                 self.window = "route"
@@ -233,6 +252,16 @@ class RouteFollower:
 
             self.gimbal_cam = GimbalCamera(self.car)
         self.gap_drive = False
+        # --perceive: the perceive_map pipeline, the gimbal rig it sweeps, and the remembered blocks.
+        self.perception = None
+        self.rig = None
+        self.block_map = None
+        self.blocks: list[dict] = []
+        self.scene = None
+        self.obstacles_now = None   # planner points from the last sweep
+        self.since_sweep = 0.0      # metres driven since that sweep
+        self.turns_since_sweep = 0  # turns without a forward drive since that sweep
+        self.need_sweep = True
         self.hug_poses: list[tuple[float, float, float]] = []
         if args.hug:
             self.hug_poses = self.build_hug_poses()
@@ -254,11 +283,15 @@ class RouteFollower:
         except Exception as exc:
             print(f"WARNING gimbal: {exc}", flush=True)
         self.grabbers = open_grabbers(
-            self.car, self.args.width, self.args.height, rear=not self.args.no_rear, sides=True
+            self.car, self.args.width, self.args.height, rear=not self.args.no_rear,
+            # --perceive streams the gimbal USB camera; with both side cameras too the USB bus drops all three.
+            sides=not self.args.perceive
         )
         self.sensors = SafetySensors(
             SimpleNamespace(no_ir=self.args.no_ir, no_sonic=self.args.no_sonic, active_high=self.args.active_high)
         )
+        if self.args.perceive:
+            self.start_perception()
         deadline = time.monotonic() + 10.0
         while time.monotonic() < deadline and not all(g.latest()[0] is not None for g in self.grabbers.values()):
             time.sleep(0.1)
@@ -284,6 +317,20 @@ class RouteFollower:
             self.motor = Ordinary_Car()
         else:
             print("DRY-RUN: no motor object; decisions are printed only.", flush=True)
+
+    def start_perception(self):
+        from block_map import BlockMap
+        from gimbal_gap import Rig
+        from perceive_map import Perception, parse_args as perceive_args
+
+        pargs = perceive_args([])
+        pargs.pans = [int(v) for v in self.args.perceive_pans.split(",")]
+        self.perception = Perception(pargs, self.arena, self.car, self.localizer)
+        self.rig = Rig(sonic=False, servo=self.servo, sensors=self.sensors)
+        size = self.perception.block_m
+        self.block_map = BlockMap(size) if self.args.new_map else BlockMap.load(size)
+        print(f"perceive: block map with {len(self.block_map.blocks)} remembered blocks, "
+              f"sweep {pargs.pans}", flush=True)
 
     def drive(self, pwm):
         if self.motor is not None:
@@ -311,6 +358,11 @@ class RouteFollower:
         if self.motor is not None:
             try:
                 self.motor.close()
+            except Exception:
+                pass
+        if self.rig is not None:
+            try:
+                self.rig.close()
             except Exception:
                 pass
         if self.sensors is not None:
@@ -594,6 +646,11 @@ class RouteFollower:
                 raise Abort("stopped")
             return 0.0, None
         reason = None
+        # --perceive: a side IR that lights up during a drive means the body is scraping something the
+        # camera and ultrasonic missed. One already lit at the start (parked against a wall) is ignored.
+        side_keys = ("wheel_left_front", "wheel_left_rear", "wheel_right_front", "wheel_right_rear")
+        watch_sides = self.perception is not None and self.sensors is not None and kind in ("forward", "reverse")
+        lit_at_start = self.sensors.read_ir() if watch_sides else {}
         started = time.monotonic()
         self.move_started, self.move_kind = started, kind
         self.drive(self._pwm(kind))
@@ -605,6 +662,12 @@ class RouteFollower:
                 if kind in ("forward", "reverse", "strafe_left", "strafe_right"):
                     reason = self.safety_reason()
                     if reason:
+                        break
+                if watch_sides:
+                    ir = self.sensors.read_ir()
+                    lit = [k for k in side_keys if ir.get(k) and not lit_at_start.get(k)]
+                    if lit:
+                        reason = f"ir_{lit[0]}"
                         break
                 time.sleep(0.04)
         finally:
@@ -844,10 +907,21 @@ class RouteFollower:
         self.ensure_turn_side_clearance(turn)
         p, margin = self.pose, self.wall_limit()
         steps = [s * k * 0.02 for k in range(1, 11) for s in (1, -1)]
-        shifts = [(0.0, 0.0)] + [(d, 0.0) for d in steps] + [(0.0, d) for d in steps if abs(d) <= 0.10]
-        reachable = [s for s in shifts
-                     if s == (0.0, 0.0) or self.sweep_clearance(p.x, p.y, p.yaw, step=s[0], side=s[1]) >= margin]
-        reachable.sort(key=lambda s: abs(s[0]) + abs(s[1]))
+        sides = [d for d in steps if abs(d) <= 0.10]
+        # In a corner one move is not enough: the rear swings into one wall and the side into the
+        # other, so a drive followed by a strafe is tried too.
+        shifts = ([(0.0, 0.0)] + [(d, 0.0) for d in steps] + [(0.0, d) for d in sides]
+                  + [(f, d) for f in steps for d in sides])
+
+        def shift_clear(sh) -> bool:
+            """Drive `sh[0]`, then strafe `sh[1]`, keeping every corner off the walls."""
+            c, sn = math.cos(p.yaw), math.sin(p.yaw)
+            if sh[0] and self.sweep_clearance(p.x, p.y, p.yaw, step=sh[0]) < margin:
+                return False
+            return not sh[1] or self.sweep_clearance(p.x + sh[0] * c, p.y + sh[0] * sn, p.yaw, side=sh[1]) >= margin
+
+        reachable = [sh for sh in shifts if sh == (0.0, 0.0) or shift_clear(sh)]
+        reachable.sort(key=lambda sh: abs(sh[0]) + abs(sh[1]))
 
         def turn_gap(s, angle):
             c, sn = math.cos(p.yaw), math.sin(p.yaw)
@@ -874,7 +948,7 @@ class RouteFollower:
             print(f"    wall too close to turn; {'forward' if step > 0 else 'reverse'} {abs(step) * 100:.0f}cm first",
                   flush=True)
             self.move("forward" if step > 0 else "reverse", abs(step) / float(self.motion["forward_mps"]))
-        elif side:
+        if side:
             if self.side_blocked(1.0 if side > 0 else -1.0):
                 print(f"    not strafing {'left' if side > 0 else 'right'}; that side is against the foam",
                       flush=True)
@@ -1667,11 +1741,20 @@ class RouteFollower:
     def save_map(self, extra=None):
         if not self.arena.get("arena_size_m"):
             return
-        self.absorb_views()
-        live = self.live_map.render(
-            pose=self.pose, route=self.route, trail=self.trail, guide=self.guide_path,
-            body_m=(self.body_half[0] * 2.0, self.body_half[1] * 2.0),
-        )
+        if self.scene is not None and self.pose is not None:
+            from perceive_map import draw_world
+
+            labels = self.scene.grid.labels(self.blocks, list(self.scene.sonic_only)
+                                            + [tuple(p) for p in self.scene.close])
+            live = draw_world(self.arena, self.car, self.scene.grid, labels, self.pose, self.scene.records,
+                              self.blocks, np.zeros((0, 2)), [], size_px=640, route=self.route,
+                              guide=self.guide_path, trail=[(x, y) for x, y, _yaw in self.trail])
+        else:
+            self.absorb_views()
+            live = self.live_map.render(
+                pose=self.pose, route=self.route, trail=self.trail, guide=self.guide_path,
+                body_m=(self.body_half[0] * 2.0, self.body_half[1] * 2.0),
+            )
         if self.home is not None:
             w_m, h_m = (float(v) for v in self.arena["arena_size_m"])
             margin = 28
@@ -2252,6 +2335,192 @@ class RouteFollower:
             self.record()
             self.save_map()
 
+    def perceive(self) -> np.ndarray:
+        """Stop, sweep the gimbal camera and ultrasonic, fold the blocks into the block map.
+
+        Returns the floor points the planner keeps the car away from. The raw sweep is saved under
+        debug-dir/scans/ so `perceive_map.py --replay DIR` can rerun it.
+        """
+        from perceive_map import acquire
+
+        self.stop()
+        raw = self.debug_dir / "scans" / time.strftime("%Y%m%d-%H%M%S")
+        raw.mkdir(parents=True, exist_ok=True)
+        print("    sweep", flush=True)
+        shots = acquire(self.perception.args, self.rig, raw)
+        self.pan_now = self.rig.pan_now
+        self.center_sonic()
+        fixes = []
+        for name in ("front", "rear"):
+            grabber = self.grabbers.get(name)
+            frame = grabber.latest()[0] if grabber is not None else None
+            if frame is not None:
+                cv2.imwrite(str(raw / f"{name}.jpg"), frame)
+                fixes += self.localizer.observe(name, frame)[0]
+        info = {"time": time.strftime("%Y-%m-%d %H:%M:%S"), "ir": self.sensors.read_ir(),
+                "pose": [self.pose.x, self.pose.y, math.degrees(self.pose.yaw)],
+                "shots": [{"pan": pan, "sonic_cm": cm} for pan, _frame, cm in shots]}
+        (raw / "sweep.json").write_text(json.dumps(info, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        scene = self.perception.scene(shots, fixes, pose=self.pose,
+                                      say=lambda text: print("    " + text.strip(), flush=True))
+        self.scene = scene
+        tags = len({f.tag_id for f in self.pose.fixes}) or 1
+        counts = self.perception.merge(scene, self.block_map, tags)
+        self.block_map.save()
+        self.blocks = self.perception.blocks(self.block_map, self.pose)
+        print(f"    blocks seen {len(scene.sightings)}; map +{counts['new']} ~{counts['updated']} "
+              f"-{counts['removed']}; remembered {len(self.blocks)}", flush=True)
+        for block in self.blocks[:4]:
+            where = (f"centre ({block['center'][0]:.2f},{block['center'][1]:.2f})" if block["shaped"]
+                     else "points only")
+            print(f"      #{block['id']} {block['color']} {where}, {block['clearance'] * 100:.0f}cm from the body, "
+                  f"seen {block['hits']}x{' (provisional: far, seen once)' if block['provisional'] else ''}",
+                  flush=True)
+        return self.perception.obstacles(self.blocks, scene.sonic_only, scene.close)
+
+    def body_gap(self, obstacles: np.ndarray, x: float, y: float, yaw: float) -> float:
+        """Shortest distance from the car's 29x18 cm outline at (x, y, yaw) to any obstacle point (<0: inside)."""
+        if not len(obstacles):
+            return math.inf
+        from block_map import rect_distance
+
+        size = (self.body_half[0] * 2.0, self.body_half[1] * 2.0)
+        return float(rect_distance(obstacles, x, y, yaw, size).min())
+
+    def clear_ahead(self, obstacles: np.ndarray, length: float, keep: float) -> float:
+        """How far the whole body can drive straight on (or back, for a negative length) and stay `keep`
+        from every obstacle. The planner sees the car as a disc; its corners reach farther than that."""
+        c, s = math.cos(self.pose.yaw), math.sin(self.pose.yaw)
+        sign = 1.0 if length >= 0 else -1.0
+        reach = 0.0
+        for d in np.arange(0.0, abs(length) + 1e-9, 0.01):
+            x, y = self.pose.x + sign * c * d, self.pose.y + sign * s * d
+            if self.body_gap(obstacles, x, y, self.pose.yaw) < keep:
+                break
+            reach = d
+        return sign * reach
+
+    def safe_turn(self, obstacles: np.ndarray, turn: float, keep: float) -> float:
+        """The largest part of an in-place turn (rad) during which no body corner comes within `keep`."""
+        for frac in (1.0, 0.75, 0.5, 0.35, 0.2):
+            steps = max(2, int(abs(math.degrees(turn * frac)) / 5.0) + 1)
+            if all(self.body_gap(obstacles, self.pose.x, self.pose.y, self.pose.yaw + turn * frac * k / (steps - 1)) >= keep
+                   for k in range(steps)):
+                return turn * frac
+        return 0.0
+
+    def go_to_mapped(self, index: int, target: tuple[float, float], prev: tuple[float, float] | None = None):
+        """--perceive: sweep, plan around the remembered blocks, one turn and one short drive.
+
+        The planner keeps the car centre half a body width plus 4 cm from the blocks; every drive and
+        turn is then checked with the whole 29x18 cm outline, which must stay `keep` from them.
+        """
+        blind = 0
+        arena = tuple(float(v) for v in self.arena["arena_size_m"])
+        inflate = self.body_half[1] + max(self.args.gap_margin_m, 0.04)
+        keep = 0.03
+        while not self.stop_event.is_set():
+            dx, dy = target[0] - self.pose.x, target[1] - self.pose.y
+            dist = math.hypot(dx, dy)
+            err_target = wrap_rad(math.atan2(dy, dx) - self.pose.yaw)
+            _aim, past, cross = self.aim_point(prev, target)
+            print(f"wp{index} ({target[0]:.2f},{target[1]:.2f}) dist={dist:.2f}m "
+                  f"err={math.degrees(err_target):+.0f}deg off-line={cross * 100:+.0f}cm "
+                  f"pose {self.pose.text()}", flush=True)
+            self.record()
+            overshot = dist < 2.5 * self.args.arrive_m and abs(err_target) > math.pi / 2
+            passed = prev is not None and past >= -self.args.arrive_m and abs(cross) < 2.5 * self.args.arrive_m
+            if dist <= self.args.arrive_m or overshot or passed:
+                print(f"reached wp{index}", flush=True)
+                self.save_map()
+                return
+            if (self.need_sweep or self.obstacles_now is None or self.since_sweep >= self.args.sweep_every_m
+                    or self.turns_since_sweep >= 3):
+                self.obstacles_now = self.perceive()
+                self.since_sweep, self.need_sweep, self.turns_since_sweep = 0.0, False, 0
+            else:
+                print(f"    driving on the last sweep's map ({self.since_sweep * 100:.0f}cm since it); no sweep",
+                      flush=True)
+            obstacles = self.obstacles_now
+            fresh = self.since_sweep == 0.0
+            # 2.5 cm cells: a gap between two blocks only a few cm wider than the car still shows.
+            plan = plan_path((self.pose.x, self.pose.y), target, arena, obstacles, inflate, resolution_m=0.025)
+            if not plan:
+                if not fresh:
+                    self.need_sweep = True
+                    continue
+                raise Abort(f"no path to wp{index}; blocks and walls close every way")
+            self.guide_path = list(plan.path)
+            self.save_map()
+            end_gap = math.hypot(plan.path[-1][0] - self.pose.x, plan.path[-1][1] - self.pose.y)
+            if plan.goal_blocked:
+                short = math.hypot(plan.path[-1][0] - target[0], plan.path[-1][1] - target[1])
+                covered = len(obstacles) and float(np.hypot(obstacles[:, 0] - target[0],
+                                                            obstacles[:, 1] - target[1]).min()) < inflate
+                if not covered:
+                    raise Abort(f"no way through to wp{index}: the blocks leave no gap wide enough for the body")
+                if end_gap < 0.08:
+                    print(f"    wp{index} is covered by a block; stopped {short * 100:.0f}cm short of it, "
+                          f"going on to the next waypoint", flush=True)
+                    return
+                print(f"    wp{index} is covered by a block; getting as close as the blocks allow", flush=True)
+            aim = lookahead(plan.path, 0.20)
+            err = wrap_rad(math.atan2(aim[1] - self.pose.y, aim[0] - self.pose.x) - self.pose.yaw)
+            print(f"    plan {len(plan.path)} cells -> ({aim[0]:.2f},{aim[1]:.2f}) turn {math.degrees(err):+.0f}deg",
+                  flush=True)
+            if abs(err) > math.radians(self.args.align_deg):
+                turn = self.safe_turn(obstacles, err, keep)
+                if abs(turn) < abs(err):
+                    back = -self.safe_step(self.clear_ahead(obstacles, -0.10, keep))
+                    if back >= 0.02:
+                        print(f"    a body corner would swing into a block; reverse {back * 100:.0f}cm before "
+                              f"turning", flush=True)
+                        self.move("reverse", back / float(self.motion["forward_mps"]))
+                        self.since_sweep += back
+                        turn = self.safe_turn(obstacles, err, keep)
+                if abs(turn) < math.radians(3.0):
+                    if not fresh:
+                        self.need_sweep = True  # look again before giving up on an old map
+                        continue
+                    raise Abort(f"cannot turn toward wp{index}: a body corner would hit a block either way")
+                if abs(turn) < abs(err):
+                    print(f"    only {math.degrees(abs(turn)):.0f} of {math.degrees(abs(err)):.0f}deg is clear of the "
+                          f"blocks; turning that much", flush=True)
+                if not self.turn_by(turn):
+                    back = -self.safe_step(self.clear_ahead(obstacles, -0.06, keep))
+                    if back < 0.02:
+                        raise Abort(f"cannot turn toward wp{index}: that side is against foam and there is no room to back off")
+                    print(f"    reverse {back * 100:.0f}cm to get off that side", flush=True)
+                    self.move("reverse", back / float(self.motion["forward_mps"]))
+                    self.since_sweep += back
+                self.turns_since_sweep += 1
+                blind = self.refresh_pose(blind)
+                err = wrap_rad(math.atan2(aim[1] - self.pose.y, aim[0] - self.pose.x) - self.pose.yaw)
+                if abs(err) > math.radians(self.args.align_deg):
+                    continue
+            segment = min(0.25, dist, math.hypot(aim[0] - self.pose.x, aim[1] - self.pose.y))
+            segment = self.safe_step(min(segment, self.clear_ahead(obstacles, segment, keep)))
+            if segment < 0.02:
+                if not fresh:
+                    self.need_sweep = True  # the old map may be what blocks the way
+                    continue
+                back = -self.safe_step(self.clear_ahead(obstacles, -0.06, keep))
+                if back < 0.02:
+                    raise Abort(f"no room to reach wp{index}")
+                print(f"    no room ahead; reverse {back * 100:.0f}cm", flush=True)
+                self.move("reverse", back / float(self.motion["forward_mps"]))
+                self.since_sweep += back
+            else:
+                print(f"    drive {segment * 100:.0f}cm", flush=True)
+                self.turns_since_sweep = 0
+                elapsed, reason = self.move("forward", segment / float(self.motion["forward_mps"]))
+                self.since_sweep += float(self.motion["forward_mps"]) * elapsed if self.motor is not None else segment
+                if reason:
+                    print(f"    drive stopped ({reason}); sweeping again", flush=True)
+                    self.need_sweep = True
+            blind = self.refresh_pose(blind)
+            self.record()
+
     def scan_test(self):
         """Print what the front camera sees as obstacles from where the car stands; never drives."""
         self.pose = self.localize(3.0)
@@ -2307,7 +2576,10 @@ class RouteFollower:
         while True:
             legs = self.legs()
             for i, (prev, wp) in enumerate(legs):
-                self.go_to(i, wp, prev)
+                if self.perception is not None:
+                    self.go_to_mapped(i, wp, prev)
+                else:
+                    self.go_to(i, wp, prev)
             if self.stop_event.is_set():
                 raise Abort("stopped")
             if self.home is not None:
@@ -2397,7 +2669,8 @@ class RouteFollower:
             turn = abs(math.degrees(wrap_rad(measured.yaw - known.yaw)))
             print(f"map home x={known.x:.2f} y={known.y:.2f} yaw={known.yaw_deg:+.0f}deg; tags read "
                   f"{off * 100:.0f}cm / {turn:.0f}deg away", flush=True)
-            if off <= 0.15 and turn <= 20.0:
+            near_tag = any(f.distance <= 1.0 for f in measured.fixes)
+            if off <= 0.15 and turn <= 20.0 and near_tag:
                 self.pose, self.home = measured, Pose2D(measured.x, measured.y, measured.yaw)
                 source = "measured (matches map home)"
             elif self.args.start_anywhere:
@@ -2405,9 +2678,15 @@ class RouteFollower:
                 source = f"map home; starting from tags at {measured.text()}"
             else:
                 self.pose, self.home = Pose2D(known.x, known.y, known.yaw), known
-                source = "map home (start fix disagrees; ignoring it)"
+                source = ("map home (start fix disagrees; ignoring it)" if near_tag else
+                          "map home (only tags over 1 m away; the placed home is surer)")
         print(f"home pose x={self.home.x:.2f} y={self.home.y:.2f} yaw={self.home.yaw_deg:+.0f}deg "
               f"[{source}]", flush=True)
+        # The filter starts from this pose and knows it is sure (the car was placed there), so a far
+        # tag seen next only nudges it instead of being taken whole.
+        self.kalman.x = np.array([self.pose.x, self.pose.y, self.pose.yaw], dtype=float)
+        self.kalman.P = np.diag([0.02 ** 2, 0.02 ** 2, math.radians(3.0) ** 2])
+        self.kalman.ready = True
 
     def averaged_fix(self, n: int) -> Pose2D | None:
         fixes = [f for f in (self.localize() for _ in range(n)) if f is not None]
@@ -2766,8 +3045,25 @@ class RouteFollower:
         return elapsed, reason
 
 
+class Tee:
+    """Print to the terminal and to a log file, so a run can be read back without copying the terminal."""
+
+    def __init__(self, stream, path: Path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.stream, self.file = stream, open(path, "w", encoding="utf-8")
+
+    def write(self, text):
+        self.stream.write(text)
+        self.file.write(text)
+
+    def flush(self):
+        self.stream.flush()
+        self.file.flush()
+
+
 def main():
     args = parse_args()
+    sys.stdout = Tee(sys.stdout, SERVER / args.debug_dir / "run.log")
     follower = RouteFollower(args)
     signal.signal(signal.SIGINT, follower.request_stop)
     signal.signal(signal.SIGTERM, follower.request_stop)

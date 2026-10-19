@@ -1,7 +1,7 @@
 {
   "pan": 87,
   "tilt": 90,
-  "right_90_pan": 180,
+  "right_90_pan": 163,
   "notes": "pan/tilt is straight ahead after the 2026-10-15 horn reset (electrical 90). left_90_pan and right_90_pan are the servo angles that look 90 degrees left and right.",
   "left_90_pan": 5
 }

@@ -68,11 +68,16 @@
   "gimbal_camera": {
     "pivot_x_m": 0.08,
     "radius_m": 0.02,
-    "z_m": 0.103,
-    "pitch_deg": 1.9,
+    "z_m": 0.1,
+    "pitch_deg": -1.5,
     "sonic_ahead_m": 0.0,
     "calibrated": true,
     "tilt_servo": 90,
-    "note": "USB 雲台鏡頭，與超音波同支架。z_m/pitch_deg 由 gimbal_gap.py --calibrate 以超音波距離（加上 --gap-cm 尺量縫寬）擬合；pivot_x_m/radius_m 為估計值。tilt 改變後需重標。"
+    "note": "USB 雲台鏡頭，與超音波同支架。2026-10-18 調整雲台線材後重標：z_m 為尺量鏡頭中心離地約 10 cm；pitch_deg 以尺量兩個距離擬合（車身左側到藍方塊 23 cm、車頭到灰方塊 15.5 cm），藍方塊誤差 0.1 cm，灰方塊偏近約 2 cm（底部陰影被當成方塊）。pivot_x_m/radius_m 為估計值。tilt 改變或動到雲台線材後需重標。"
+  },
+  "sonic": {
+    "pivot_x_m": 0.085,
+    "arm_m": 0.03,
+    "note": "雲台超音波探頭面：在左右轉軸前方 arm_m，轉軸在車心前 pivot_x_m。2026-10-18 實測：朝正前方時探頭面在車頭邊緣內 3 cm，朝左右 90 度時在車側內 6 cm（車寬 18 cm）。"
   }
 }

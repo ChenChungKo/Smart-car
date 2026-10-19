@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Width of the gap between two blue foam obstacles, seen by the gimbal (pan/tilt) USB camera.
+"""Width of the gap between two foam obstacles, seen by the gimbal (pan/tilt) USB camera.
 
 The gimbal camera shares the pan servo with the ultrasonic. In every image column the lowest
-blue pixel is where the foam meets the floor; the camera height and pitch turn that pixel into
+pixel that is not light floor (blue foam, or a black/grey block or wall) is where it meets the floor; the camera height and pitch turn that pixel into
 a floor point in the car frame (x forward, y left). Neighbouring columns that land close together
 belong to one obstacle; where the nearer obstacle ends, its last floor point is a real corner.
 The gap width is the floor distance between the two corners that face each other.
@@ -73,12 +73,14 @@ class Gap:
 
 
 class GimbalCamera:
-    def __init__(self, car: dict, hsv_lo=(85, 30, 20), hsv_hi=(125, 255, 255), column_step: int = 4):
+    def __init__(self, car: dict, hsv_lo=(85, 30, 20), hsv_hi=(125, 255, 255), dark_ratio: float = 0.70,
+                 column_step: int = 4):
         self.localizer = ArucoLocalizer(load_json(MAP_PATH), car)
         self.k, self.d = self.localizer.kd(CAMERA, WIDTH, HEIGHT)
         # Kept out of camera_mounts: ArucoLocalizer treats every entry there as a fixed camera.
         self.geometry = dict(DEFAULT_GEOMETRY, **car.get("gimbal_camera", {}))
         self.lo, self.hi = np.array(hsv_lo, np.uint8), np.array(hsv_hi, np.uint8)
+        self.dark_ratio = dark_ratio
         self.columns = np.arange(column_step // 2, WIDTH, column_step)
 
     def mount(self, pan_deg: float, geometry: dict | None = None) -> dict:
@@ -93,10 +95,32 @@ class GimbalCamera:
         }
 
     def mask(self, bgr: np.ndarray) -> np.ndarray:
+        """Anything standing on the light floor: blue foam, or dark (black/grey blocks, grey walls).
+
+        Blue foam is S > 85. Dark is judged against the floor in the same column, because the floor
+        itself is dimmer in the fisheye corners and in a dim frame. Grey foam is 0.20-0.38 of the
+        floor in shade but up to 0.67 facing the light, while a block's shadow on the floor is
+        0.41-0.55, so brightness cannot tell them apart. `dark_ratio` keeps every block: a shadow
+        taken for foam only makes a block look bigger, a missed block is driven into.
+        """
         img = cv2.resize(bgr, (WIDTH, HEIGHT), interpolation=cv2.INTER_AREA)
-        blue = cv2.inRange(cv2.cvtColor(img, cv2.COLOR_BGR2HSV), self.lo, self.hi)
-        blue = cv2.morphologyEx(blue, cv2.MORPH_OPEN, np.ones((7, 3), np.uint8))
-        return cv2.morphologyEx(blue, cv2.MORPH_CLOSE, np.ones((9, 3), np.uint8))
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        solid = cv2.inRange(hsv, self.lo, self.hi) | np.where(hsv[:, :, 2] < self.dark_ratio * self.floor_level(hsv),
+                                                                255, 0).astype(np.uint8)
+        solid = cv2.morphologyEx(solid, cv2.MORPH_OPEN, np.ones((7, 3), np.uint8))
+        return cv2.morphologyEx(solid, cv2.MORPH_CLOSE, np.ones((9, 3), np.uint8))
+
+    @staticmethod
+    def floor_level(hsv: np.ndarray) -> np.ndarray:
+        """Brightness of the floor in each column, from the bottom quarter of the frame (1 x WIDTH)."""
+        lower = hsv[int(hsv.shape[0] * 0.75):].astype(np.float32)
+        overall = float(np.median(lower[:, :, 2]))
+        # Floor is colourless and not much darker than the rest of the floor; foam there is left out.
+        floor = (lower[:, :, 1] < 30) & (lower[:, :, 2] > 0.6 * overall)
+        counts = floor.sum(axis=0)
+        level = np.where(counts > 0, (lower[:, :, 2] * floor).sum(axis=0) / np.maximum(counts, 1), overall)
+        level = np.maximum(level, 0.5 * overall)  # a column whose bottom is all foam borrows the frame's floor
+        return cv2.blur(level.reshape(1, -1), (31, 1)).reshape(1, -1)
 
     def feet(self, bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """(columns, foot rows) where blue foam meets the floor; row -1 = no foam, row HEIGHT = foot below the frame."""
@@ -215,10 +239,12 @@ class GimbalCamera:
         return gaps
 
 
-def draw_frame(bgr, cam: GimbalCamera, cols, rows, pts, gaps: list[Gap], pan_deg: float, need_m: float):
+def draw_frame(bgr, cam: GimbalCamera, cols, rows, pts, gaps: list[Gap], pan_deg: float, need_m: float,
+               tint: bool = True):
     img = cv2.resize(bgr, (WIDTH, HEIGHT)).copy()
-    tint = cam.mask(img) > 0
-    img[tint] = (0.6 * img[tint] + 0.4 * np.array([255, 120, 0])).astype(np.uint8)
+    if tint:
+        solid = cam.mask(img) > 0
+        img[solid] = (0.6 * img[solid] + 0.4 * np.array([255, 120, 0])).astype(np.uint8)
     for c, r, p in zip(cols, rows, pts):
         if 0 <= r < HEIGHT and not np.isnan(p[0]):
             cv2.circle(img, (int(c), int(r)), 2, (0, 255, 255), -1)
@@ -269,27 +295,36 @@ def draw_top(profiles, gaps: list[Gap], need_m: float, body_m, size_px: int = 60
 
 
 class Rig:
-    """Gimbal camera, pan/tilt servo and ultrasonic; releases the servo PWM on close."""
+    """Gimbal camera, pan/tilt servo and ultrasonic; releases the servo PWM on close.
 
-    def __init__(self, sonic: bool):
+    A caller that already drives the servo and ultrasonic (route_follow) passes them in, so the
+    PCA9685 that also runs the wheels is not set up twice; then close() leaves the servo alone.
+    """
+
+    def __init__(self, sonic: bool, servo=None, sensors=None):
         from servo import Servo, load_gimbal_home, load_left_90_pan, load_right_90_pan
 
+        self.own_servo = servo is None
         self.grabber = UsbGrabber(CAMERA).start()
-        self.servo = Servo()
-        self.home_pan, self.home_tilt = load_gimbal_home()
-        self.right_90 = load_right_90_pan(self.home_pan)
-        self.left_90 = load_left_90_pan()
-        self.pan_now = self.home_pan
-        self.sensors = None
-        if sonic:
-            from safe_surround_cruise import SafetySensors
+        try:
+            self.servo = Servo() if servo is None else servo
+            self.home_pan, self.home_tilt = load_gimbal_home()
+            self.right_90 = load_right_90_pan(self.home_pan)
+            self.left_90 = load_left_90_pan()
+            self.pan_now = self.home_pan
+            self.sensors = sensors
+            if sonic and sensors is None:
+                from safe_surround_cruise import SafetySensors
 
-            self.sensors = SafetySensors(SimpleNamespace(no_ir=True, no_sonic=False, active_high=False))
-        deadline = time.monotonic() + 8.0
-        while self.grabber.latest()[0] is None and time.monotonic() < deadline:
-            time.sleep(0.1)
-        if self.grabber.latest()[0] is None:
-            raise RuntimeError(f"gimbal camera not ready: {self.grabber.error}")
+                self.sensors = SafetySensors(SimpleNamespace(no_ir=True, no_sonic=False, active_high=False))
+            deadline = time.monotonic() + 8.0
+            while self.grabber.latest()[0] is None and time.monotonic() < deadline:
+                time.sleep(0.1)
+            if self.grabber.latest()[0] is None:
+                raise RuntimeError(f"gimbal camera not ready: {self.grabber.error}")
+        except Exception:
+            self.grabber.close()
+            raise
 
     def pan(self, pan_deg: float, settle_s: float = 0.6):
         from servo import servo_pan_for_bearing
@@ -322,8 +357,9 @@ class Rig:
         try:
             self.pan(0.0, settle_s=0.4)
         finally:
-            self.servo.pwm_servo.set_pwm(8, 0, 0)
-            self.servo.pwm_servo.set_pwm(9, 0, 0)
+            if self.own_servo:
+                self.servo.pwm_servo.set_pwm(8, 0, 0)
+                self.servo.pwm_servo.set_pwm(9, 0, 0)
             self.grabber.close()
 
 

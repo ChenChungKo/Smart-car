@@ -170,6 +170,15 @@ class ArucoLocalizer:
         k, d = self.base_kd[camera]
         return np.diag([width / CALIB_W, height / CALIB_H, 1.0]) @ k, d
 
+    def add_view(self, name: str, mount: dict, intrinsics: str) -> None:
+        """Register one pose of a moving camera (e.g. the gimbal at one pan angle) as its own camera.
+
+        Fixes from several views then go through the same joint fit as the fixed cameras.
+        """
+        self.kd(intrinsics, CALIB_W, CALIB_H)
+        self.base_kd[name] = self.base_kd[intrinsics]
+        self.cam_T_car[name] = np.linalg.inv(car_from_camera(mount))
+
     def fisheye(self, camera: str) -> bool:
         if camera not in self.base_kd:
             self.kd(camera, CALIB_W, CALIB_H)
