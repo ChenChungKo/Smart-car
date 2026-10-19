@@ -386,6 +386,28 @@ class ArucoLocalizer:
             f.fit_px = float(e)
         return Pose2D(x, y, wrap_rad(yaw), stamp, list(fixes), total)
 
+    def heading_only(self, fixes: list[TagFix]) -> tuple[float, float, int] | None:
+        """Heading from several far tags that agree on it although their positions do not (rad, spread rad, tags).
+
+        Each tag alone fits its own corners well (a few px) but its range is loose, so the joint fit of several far
+        tags is refused; the heading of each is still good to a few degrees. Used when `fuse` gives nothing.
+        """
+        yaws = []
+        for f in self._central(fixes):
+            if not f.usable:
+                continue
+            res = self._refine([f], (f.x, f.y, f.yaw))
+            if float(self._per_fix_rms(res, 1)[0]) <= 2.0 * self.max_err_px:
+                yaws.append(float(res.x[2]))
+        if len(yaws) < 2:
+            return None
+        ref = yaws[0]
+        offs = [wrap_rad(y - ref) for y in yaws]
+        spread = max(offs) - min(offs)
+        if spread > math.radians(6.0):
+            return None
+        return wrap_rad(ref + sum(offs) / len(offs)), spread, len(yaws)
+
     def fit_pitch(self, fixes: list[TagFix]) -> tuple[dict[str, float], float | None]:
         """Pitch per camera that sees two or more tags, car parked on a flat floor."""
         fixes = self._central(fixes)

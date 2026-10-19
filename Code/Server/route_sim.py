@@ -249,6 +249,8 @@ def main():
     p.add_argument("--forward-error", type=float, default=MotionError.forward)
     p.add_argument("--strafe-error", type=float, default=MotionError.strafe)
     p.add_argument("--turn-error", type=float, default=MotionError.turn)
+    p.add_argument("--corner-bias", default="0,0,0", metavar="X,Y,DEG",
+                   help="Tag fixes near home are off by this (m, m, deg); the real start fix was (-0.10,+0.04,-5).")
     p.add_argument("--simple-fixes", action="store_true",
                    help="Tag fixes with 1 cm / 1 deg noise at any distance, instead of noise growing with it.")
     p.add_argument("--fix-outlier", type=float, default=0.0,
@@ -269,7 +271,8 @@ def main():
               ", ".join(f"x {b[0] * 100:.0f}~{b[1] * 100:.0f} y {b[2] * 100:.0f}~{b[3] * 100:.0f}" for b in blocks_m))
     error = MotionError(forward=a.forward_error, strafe=a.strafe_error, turn=a.turn_error, fix_loss=a.fix_loss,
                          strafe_yaw_deg_per_m=a.strafe_yaw,
-                         fix_outlier=a.fix_outlier, realistic_fixes=not a.simple_fixes)
+                         fix_outlier=a.fix_outlier, realistic_fixes=not a.simple_fixes,
+                         corner_bias=tuple(float(v) for v in a.corner_bias.split(",")))
     label = Path(a.world).stem if a.world else "custom" if a.blocks is not None else a.layout
     results = [run_once(f"{label}_{a.seed + k}", blocks_m, a.seed + k, extra, error, not a.verbose, a.dark_blocks,
                         a.sonic_half_deg)

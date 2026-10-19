@@ -50,6 +50,7 @@ class MotionError:
     turn: float = 0.97
     drift_deg_per_m: float = 4.0   # the real car drifts left while driving straight
     strafe_yaw_deg_per_m: float = 0.0  # a strafe to the left turns the car this much clockwise (unequal wheels)
+    corner_bias: tuple = (0.0, 0.0, 0.0)  # tag fixes at home itself (6 cm) are off by this (x m, y m, yaw deg): close tags
     fix_outlier: float = 0.0       # share of tag fixes that are wrong: 12-20 cm off, heading up to 35 deg off
     realistic_fixes: bool = True   # tag noise grows with the nearest tag's distance (else 1 cm / 1 deg)
     fix_loss: float = 0.0          # share of tag looks that give no fix (far tags only): position is dead-reckoned
@@ -177,6 +178,9 @@ class SimFollower(RouteFollower):
         e = self.error
         if e.fix_loss and random.random() < e.fix_loss:
             return self.accept_fix(None)
+        home = self.arena["home"]
+        if any(e.corner_bias) and math.hypot(x - home[0], y - home[1]) < 0.06:
+            x, y, yaw = x + e.corner_bias[0], y + e.corner_bias[1], yaw + math.radians(e.corner_bias[2])
         if not e.realistic_fixes:  # equal noise at any distance, as a fix of two tags 80 cm away
             fixes = [SimpleNamespace(camera="front", tag_id=k, distance=0.8 + 0.1 * k) for k in range(2)]
             return self.accept_fix(Pose2D(x + random.gauss(0.0, e.fix_sigma_m), y + random.gauss(0.0, e.fix_sigma_m),
@@ -197,6 +201,8 @@ class SimFollower(RouteFollower):
         m, e = self.motion, self.error
         if kind not in ("left", "right"):
             self.last_turn = None
+        if kind not in ("strafe_left", "strafe_right"):
+            self.strafe_acc = None
         vx, vy, wz = {
             "forward": (m["forward_mps"] * e.forward, 0.0, 0.0),
             "reverse": (-m["forward_mps"] * e.forward, 0.0, 0.0),

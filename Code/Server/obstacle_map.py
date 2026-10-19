@@ -22,6 +22,8 @@ import numpy as np
 
 WALL_BAND_M = 0.07   # a foot this close to a wall is the wall (more for far feet, see `wall_band`)
 CAMERA_X_M = 0.10    # the gimbal camera, ahead of the car centre: far feet are less exact
+DEPTH_20_FROM_M = 0.125   # a face seen this far from the wall (95th percentile) is the end of a block standing out from it
+MAP_RANGE_M = 0.36   # only feet this near the camera make blocks: farther, a wall's foot is off by more than its band
 OUTSIDE_M = 0.04     # a foot this far beyond a wall is something outside the arena (people, a fridge)
 CLUSTER_GAP_M = 0.045
 BLOCK_REACH_M = 0.22     # foot points farther than this from the middle of a cluster are not the same block
@@ -132,8 +134,9 @@ def lane_report(points: np.ndarray, lanes, half_width: float) -> list[dict]:
 
 
 class ObstacleMap:
-    def __init__(self, size):
+    def __init__(self, size, block=(0.20, 0.10)):
         self.w, self.h = (float(v) for v in size)
+        self.block = (max(block), min(block))  # long and short side of one foam block
         self.blocks: list[dict] = []
         self.next_id = 1
         self.scan_obstacle = np.zeros((0, 2))
@@ -161,12 +164,24 @@ class ObstacleMap:
                 self.next_id += 1
                 self.blocks.append(block)
             block["last_scan"] = self.scans
-            # Only the latest look draws the block: the pose drifts 10-20 cm between looks, so the points of
-            # older looks lie somewhere else and stacking them smears one block over half the arena. An
-            # older look is added only when the latest has too few points to outline anything.
-            pts = block["obs"][-1] if len(block["obs"][-1]) >= 8 else np.vstack(block["obs"])
+            # Decisions (the detour's `passing` points) use the plain rule: the latest look if it has 8 points,
+            # else all of the last three.
+            pts = block["obs"][-1] if len(block["obs"]) and len(block["obs"][-1]) >= 8 else np.vstack(block["obs"])
             block["points"], block["centre"] = pts, pts.mean(axis=0)
-            block["outline"] = self._outline(pts)
+            # The drawing uses only feet near the camera (far feet of a wall land off the wall and make corner
+            # blocks) and keeps its own outline; it never changes what the car decides.
+            cam = to_world(np.array([[CAMERA_X_M, 0.0]]), pose)[0]
+            near_pts = cluster[np.hypot(cluster[:, 0] - cam[0], cluster[:, 1] - cam[1]) <= MAP_RANGE_M]
+            if len(near_pts) >= 5:
+                block["near_hits"] = block.get("near_hits", 0) + 1
+                block["draw_obs"] = (block.get("draw_obs", []) + [near_pts])[-3:]
+                # Only the latest look draws, unless it is thin (next to the block the camera is blind: 7 points
+                # in a 2 cm bunch must not overwrite the 30 points of the look from 20 cm away).
+                latest = block["draw_obs"][-1]
+                fullest = max(block["draw_obs"], key=len)
+                dpts = latest if (len(latest) >= 15 or len(latest) >= 0.6 * len(fullest)) else fullest
+                block["draw_points"] = dpts
+                block["outline"] = self._outline(dpts)
             seen.append(block)
         return seen
 
@@ -188,6 +203,37 @@ class ObstacleMap:
                 out.append(world[members])
         return out
 
+    def _wall_box(self, pts: np.ndarray) -> np.ndarray | None:
+        """A block standing against a wall, drawn at its real size, or None when the points are not that.
+
+        The car sees the face towards it and the foot points scatter by a few cm, so their extent is 19 cm
+        wide for a block 10 cm wide, and the side towards the wall is not seen at all. What is known: the
+        block is 20 x 10 cm and touches the wall. Its DEPTH (from the wall out to the face the car sees) is
+        10 or 20: the nearer of the two to what was seen. Its WIDTH along the wall is then the other one, centred
+        on the foot points.
+        """
+        if len(pts) < 5:
+            return None
+        mid = np.median(pts, axis=0)
+        # the wall nearest the block: (axis across the wall, coordinate of the wall)
+        axis, wall_at = min(((0, 0.0), (0, self.w), (1, 0.0), (1, self.h)), key=lambda t: abs(mid[t[0]] - t[1]))
+        if abs(mid[axis] - wall_at) > 0.22:
+            return None  # not against a wall
+        seen_depth = float(np.percentile(np.abs(pts[:, axis] - wall_at), 95))
+        if seen_depth > 0.28:
+            return None  # deeper than a block: two blocks, or a wall
+        depth = self.block[0] if seen_depth >= DEPTH_20_FROM_M else self.block[1]
+        width = self.block[1] if depth == self.block[0] else self.block[0]
+        along = 1 - axis
+        centre = float(np.median(pts[:, along]))
+        reach = self.h if along == 1 else self.w
+        lo = min(max(centre - width / 2.0, 0.0), reach - width)  # kept inside the arena
+        hi = lo + width
+        n_lo, n_hi = (0.0, depth) if wall_at == 0.0 else (wall_at - depth, wall_at)
+        if axis == 0:   # wall at x = 0 or x = w: the block runs out from it in x and spreads along y
+            return np.array([[n_lo, lo], [n_hi, lo], [n_hi, hi], [n_lo, hi]])
+        return np.array([[lo, n_lo], [hi, n_lo], [hi, n_hi], [lo, n_hi]])
+
     def _outline(self, pts: np.ndarray) -> np.ndarray:
         """Polygon of a block: the foot line seen, carried out to the wall it stands against (if close).
 
@@ -197,6 +243,9 @@ class ObstacleMap:
         centre = np.median(pts, axis=0)
         near = np.hypot(*(pts - centre).T) <= BLOCK_REACH_M
         pts = pts[near] if near.sum() >= 4 else pts
+        box = self._wall_box(pts)
+        if box is not None:
+            return box
         plain = cv2.convexHull((pts * 100.0).astype(np.float32)).reshape(-1, 2) / 100.0
         hull_pts = pts
         d = inner_distance(pts, (self.w, self.h))
@@ -226,11 +275,12 @@ class ObstacleMap:
 
     def as_dict(self) -> list[dict]:
         return [{"id": b["id"], "hits": b["hits"], "centre_m": [round(float(v), 3) for v in b["centre"]],
-                 "outline_m": np.round(b["outline"], 3).tolist()} for b in self.blocks]
+                 "outline_m": np.round(b["outline"], 3).tolist()} for b in self.blocks if "outline" in b]
 
     # ---- drawing ----------------------------------------------------------
 
-    def draw(self, img: np.ndarray, size_px: int = 640, margin: int = 30, min_hits: int = 2) -> np.ndarray:
+    def draw(self, img: np.ndarray, size_px: int = 640, margin: int = 30, min_hits: int = 3,
+             show_walls: bool = False) -> np.ndarray:
         """Draw onto route_follow's map image (aruco_localizer.draw_map: margin 30, 640 px)."""
         scale = (size_px - 2 * margin) / max(self.w, self.h)
         floor_h = int(self.h * scale) + 2 * margin
@@ -238,11 +288,14 @@ class ObstacleMap:
         def px(p):
             return int(round(margin + p[0] * scale)), int(round(floor_h - margin - p[1] * scale))
 
-        for p in self.scan_wall:
-            cv2.circle(img, px(p), 1, (170, 170, 170), -1)
+        if show_walls:  # the foot points taken for the arena walls: a check of the pose, not of the obstacles
+            for p in self.scan_wall:
+                cv2.circle(img, px(p), 1, (170, 170, 170), -1)
+        shown = 0
         for block in self.blocks:
-            if block["hits"] < min_hits:
+            if block.get("near_hits", 0) < min_hits or "outline" not in block:
                 continue  # seen once: far feet and wall edges look like blocks; wait for a second look
+            shown += 1  # numbered by what is drawn: ids of one-look false blocks are not shown, so no gaps
             fresh = block.get("last_scan", 0) >= self.scans - 1
             color = (0, 0, 220) if fresh else (110, 110, 200)
             poly = np.array([px(p) for p in block["outline"]], np.int32)
@@ -250,12 +303,12 @@ class ObstacleMap:
             cv2.fillPoly(overlay, [poly], color)
             cv2.addWeighted(overlay, 0.25, img, 0.75, 0, img)
             cv2.polylines(img, [poly], True, color, 2, cv2.LINE_AA)
-            for p in block["points"]:
+            for p in block["draw_points"]:
                 cv2.circle(img, px(p), 1, (0, 120, 255), -1)
-            u, v = px(block["centre"])
-            cv2.putText(img, f"B{block['id']}", (u - 10, v + 4), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 3,
+            u, v = px(block["draw_points"].mean(axis=0))
+            cv2.putText(img, f"B{shown}", (u - 10, v + 4), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 3,
                         cv2.LINE_AA)
-            cv2.putText(img, f"B{block['id']}", (u - 10, v + 4), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1,
+            cv2.putText(img, f"B{shown}", (u - 10, v + 4), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1,
                         cv2.LINE_AA)
         for p in self.scan_obstacle:
             cv2.circle(img, px(p), 2, (0, 60, 255), -1)

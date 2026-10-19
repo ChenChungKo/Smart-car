@@ -227,7 +227,7 @@ def main():
     # the picture: map on the left, camera views on the right
     route = [(a[0], a[1]) for _n, a, _b in lanes] + [lanes[0][1]]
     img = draw_map(arena, route=route, trail=[], pose=pose, size_px=640)
-    omap.draw(img, min_hits=1)
+    omap.draw(img, min_hits=1, show_walls=True)
     margin, scale = 30, (640 - 60) / max(size)
     ih = int(size[1] * scale) + 2 * margin
 

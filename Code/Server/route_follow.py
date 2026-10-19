@@ -52,8 +52,12 @@ SONIC_HALF_DEG = 8.0   # assumed half width of the ultrasonic beam; the HC-SR04'
 SCAN_STEP_M = 0.15     # longest lane step between two looks with the ultrasonic only
 BLIND_GAP_M = 0.24     # anything nearer than this (from the ultrasonic face) is in the camera blind zone: it then reports the
                        # bottom row of the frame, 15-17 cm ahead of the nose on the car, not the distance
+DEPART_TOL_DEG = 2.0   # a lane is driven only once the heading is within this of it (4 deg over a metre is 7 cm)
 CAM_STEP_M = 0.20      # ... with the camera, which sees the lane 35 cm ahead of the nose
+WIDE_PANS = (80.0, 60.0, 40.0, 20.0, 0.0, -20.0, -40.0, -60.0, -80.0, 0.0)  # one full sweep, far left to far right
 CAM_PANS = (-30.0, 30.0, 0.0)  # gimbal angles of one camera look (+ = left); ends facing ahead
+HOME_WALL_MARGIN_M = 0.03  # the parking spot keeps the whole body this far inside the walls
+BLIND_SLANT_GAP_M = 0.16   # nearer than this to the block, only the straight look is trusted for the strafe distance
 PASS_MARGIN_M = 0.08   # the tail clears the block's far face by this much before strafing back (pose drifts a few cm)
 WALL_ECHO_M = 0.16     # what the camera sees this close to where the pose puts the wall ahead is the wall
 PATH_MARGIN_M = 0.025  # an obstacle within this of the body's width counts as in the path
@@ -94,6 +98,12 @@ def parse_args(argv: list[str] | None = None):
                    help="In --hug lanes, stop at an obstacle instead of strafing around it.")
     p.add_argument("--no-pose-filter", dest="pose_filter", action="store_false",
                    help="In --hug, accept or ignore each tag fix with fixed jump limits instead of the pose filter.")
+    p.add_argument("--no-learn-motion", dest="learn_motion", action="store_false",
+                   help="Do not learn from tag fixes, during the run, how far the car really turns (rate, and how much "
+                        "a strafe turns it). Learned values are for this run only; they are not saved.")
+    p.add_argument("--save-learned", action="store_true",
+                   help="Write the learned strafe speed back to car_nav.json at the end. Off by default: with a weak "
+                        "battery the number drifts from run to run.")
     p.add_argument("--no-save-looks", dest="save_looks", action="store_false",
                    help="Do not save every camera look (frames and pose) under debug-dir/looks for replay.")
     p.add_argument("--no-camera-obstacles", dest="camera_obstacles", action="store_false",
@@ -169,6 +179,8 @@ class RouteFollower:
         self.stop_event = threading.Event()
         self.sonic_misses = 0
         self.travel = 0.0  # forward distance of the move in progress, not yet in the pose
+        self.strafe_yaw = 0.0  # rad the car turns per metre of strafe to the left (learned; negative = clockwise)
+        self.strafe_acc: list[float] | None = None  # [yaw at the start, metres strafed (left +)] since the last fix
         self.turn_scale = {"left": 1.0, "right": 1.0}  # learned from tag fixes after turns (battery changes the rate)
         self.last_turn: tuple[str, float, float] | None = None  # (kind, yaw before, commanded turn rad), for learning
         self.closing_cm: float | None = None  # ultrasonic stop while closing in on an obstacle to go around
@@ -209,6 +221,7 @@ class RouteFollower:
         self.jumps = 0
         self.jump_pose: Pose2D | None = None
         self.parking = False
+        self.home_open_loop = False  # the home fix was not usable: park by a relative move from the lane start
         self.lane_yaw: float | None = None
         self.lane_check = False
         self.allow_gap: float | None = None
@@ -291,7 +304,7 @@ class RouteFollower:
     def close(self):
         self.stop_event.set()
         self.stop()
-        if self.motor is not None and abs(self.strafe_mps - self.strafe_base) > 0.005:
+        if self.args.save_learned and self.motor is not None and abs(self.strafe_mps - self.strafe_base) > 0.005:
             self.motion["strafe_mps"] = round(self.strafe_mps, 3)
             self.car["motion"] = self.motion
             self.car_path.write_text(json.dumps(self.car, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -462,7 +475,28 @@ class RouteFollower:
         pose = self.localizer.fuse(fixes, time.monotonic())
         if pose is None and fixes:
             print(f"  no fix: {self.localizer.last_reject}; dead-reckoning", flush=True)
+            self.heading_from_far_tags(fixes)
         return self.accept_fix(pose)
+
+    def heading_from_far_tags(self, fixes) -> None:
+        """No joint fix, but two or more far tags agree on the heading: take the heading, keep the dead-reckoned
+        position. After a corner the dead-reckoned heading was 25 deg off while two tags said so for the whole lane."""
+        if self.pose is None or not self.use_filter or not self.kalman.ready:
+            return
+        found = self.localizer.heading_only(fixes)
+        if found is None:
+            return
+        yaw, spread, count = found
+        error = math.degrees(wrap_rad(yaw - self.pose.yaw))
+        if abs(error) < 2.0:
+            return
+        print(f"  {count} far tags agree on the heading ({math.degrees(yaw):+.0f}deg, dead-reckoned "
+              f"{math.degrees(self.pose.yaw):+.0f}deg): taking the tags' heading", flush=True)
+        self.pose.yaw = yaw
+        self.pose.fixes = list(fixes)
+        self.kalman.sync(self.pose.x, self.pose.y, yaw)
+        self.kalman.P[2, 2] = min(float(self.kalman.P[2, 2]), math.radians(4.0) ** 2)
+        self.learn_turn(yaw)
 
     def accept_fix(self, pose: Pose2D | None) -> Pose2D | None:
         """Fuse a tag fix into the pose: the filter (--hug), or the fixed jump limits of `accept_fix_hard`."""
@@ -500,11 +534,13 @@ class RouteFollower:
             fused = pose
             if len(pairs) >= 2:
                 self.learn_turn(pose.yaw)
+                self.learn_strafe(pose.yaw)
         else:
             fused = Pose2D(float(self.kalman.x[0]), float(self.kalman.x[1]), float(self.kalman.x[2]), pose.stamp,
                            pose.fixes, pose.rms_px)
             if len(pairs) >= 2:
                 self.learn_turn(pose.yaw)
+                self.learn_strafe(pose.yaw)
         self.jumps, self.jump_pose = 0, None
         moved = math.hypot(fused.x - before.x, fused.y - before.y)
         turned = abs(math.degrees(wrap_rad(fused.yaw - before.yaw)))
@@ -585,6 +621,8 @@ class RouteFollower:
         """Timed motion; forward segments stop early on a safety reason."""
         if kind not in ("left", "right"):
             self.last_turn = None
+        if kind not in ("strafe_left", "strafe_right"):
+            self.strafe_acc = None
         if self.motor is None:
             print(f"    would {kind} {duration:.2f}s", flush=True)
             if self.stop_event.wait(0.5):
@@ -615,6 +653,24 @@ class RouteFollower:
         """Turn rate (deg/s) of "left" or "right": car_nav.json, scaled by what the last turns really did."""
         return float(self.motion["turn_left_dps" if kind == "left" else "turn_right_dps"]) * self.turn_scale[kind]
 
+    def learn_strafe(self, fix_yaw: float) -> None:
+        """A tag fix after a long enough strafe says how much it turned the car: learn deg per metre.
+
+        The wheels are not equally strong, so a strafe is also a turn (about 1 deg per cm on this car). Strafes
+        add up until a fix arrives; under 8 cm in all the turn is lost in the noise of the fix.
+        """
+        acc, self.strafe_acc = self.strafe_acc, None
+        if acc is None or abs(acc[1]) < 0.08 or not self.args.learn_motion:
+            return
+        sample = wrap_rad(fix_yaw - acc[0]) / acc[1]
+        if abs(sample) > 3.0:  # more than 170 deg per metre: not this (a re-localization, a turn in between)
+            return
+        old = self.strafe_yaw
+        self.strafe_yaw = 0.5 * self.strafe_yaw + 0.5 * sample
+        if abs(self.strafe_yaw - old) > math.radians(10.0):
+            print(f"    strafe turns the car {math.degrees(self.strafe_yaw) / 100.0:+.2f}deg/cm (was "
+                  f"{math.degrees(old) / 100.0:+.2f})", flush=True)
+
     def learn_turn(self, fix_yaw: float) -> None:
         """A tag fix right after a turn says how far it really turned: correct the rate used for the next turns.
 
@@ -622,7 +678,8 @@ class RouteFollower:
         turns of 25 deg or more teach (a small one is as noisy as the fix), and a rate moves half way to what
         was seen, within 0.7 to 1.4 times the calibration.
         """
-        if self.last_turn is None:
+        if self.last_turn is None or not self.args.learn_motion:
+            self.last_turn = None
             return
         kind, before, commanded = self.last_turn
         self.last_turn = None
@@ -657,8 +714,12 @@ class RouteFollower:
             self.pose.y += step * math.sin(self.pose.yaw)
         elif kind in ("strafe_left", "strafe_right"):
             side = self.strafe_mps * elapsed * (1.0 if kind == "strafe_left" else -1.0)
+            if self.strafe_acc is None:
+                self.strafe_acc = [self.pose.yaw, 0.0]
+            self.strafe_acc[1] += side
             self.pose.x -= side * math.sin(self.pose.yaw)
             self.pose.y += side * math.cos(self.pose.yaw)
+            self.pose.yaw = wrap_rad(self.pose.yaw + self.strafe_yaw * side)  # the car turns while it strafes
         elif kind == "left":
             self.pose.yaw = wrap_rad(self.pose.yaw + math.radians(self.turn_rate("left") * elapsed))
         elif kind == "right":
@@ -801,7 +862,8 @@ class RouteFollower:
     def save_map(self):
         if not self.arena.get("arena_size_m"):
             return
-        img = draw_map(self.arena, route=self.route, trail=self.trail, pose=self.pose, size_px=640)
+        img = draw_map(self.arena, route=None, trail=self.trail, pose=self.pose, size_px=640)
+        self.draw_route(img)
         if self.home is not None:
             w_m, h_m = (float(v) for v in self.arena["arena_size_m"])
             margin, scale = 30, (640 - 2 * 30) / max(w_m, h_m)
@@ -835,6 +897,44 @@ class RouteFollower:
                 cv2.putText(view, name, (8, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2, cv2.LINE_AA)
                 img = np.hstack([img, view])
         self.write_frame(img)
+
+    def draw_route(self, img) -> None:
+        """The route over the map: a line, and ONE label per place.
+
+        The lap's corners have four route points on one spot (lane end, corner, turned, next lane start); one
+        label each drew them on top of each other. With --hug the labels are 1-4, the corners in lap order;
+        other routes keep the waypoint numbers of the log.
+        """
+        if not self.route:
+            return
+        w_m, h_m = (float(v) for v in self.arena["arena_size_m"])
+        margin, scale = 30, (640 - 60) / max(w_m, h_m)
+        img_h = int(h_m * scale) + 2 * margin
+
+        def px(x, y):
+            return int(round(margin + x * scale)), int(round(img_h - margin - y * scale))
+
+        layer = img.copy()
+        points = [px(x, y) for x, y in self.route]
+        for a, b in zip(points, points[1:]):
+            cv2.line(layer, a, b, (200, 160, 0), 2, cv2.LINE_AA)
+        places: dict[tuple[int, int], list[int]] = {}
+        for i, p in enumerate(points[:-1] if len(points) > 1 and points[0] == points[-1] else points):
+            places.setdefault((round(p[0] / 6), round(p[1] / 6)), []).append(i)
+        for number, (key, indices) in enumerate(places.items(), 1):
+            p = points[indices[0]]
+            cv2.circle(layer, p, 5, (200, 160, 0), -1)
+            if self.args.hug:
+                text = str(number)  # the lap's corners, 1-4 counter-clockwise from the start (the log keeps p-numbers)
+            else:
+                text = str(indices[0]) if len(indices) == 1 else f"{indices[0]}-{indices[-1]}"
+                if len(indices) > 1 and indices != list(range(indices[0], indices[-1] + 1)):
+                    text = ",".join(str(i) for i in indices)
+            # the label sits outside the arena middle, away from the lines
+            dx = 8 if p[0] >= img.shape[1] // 2 else -8 - 7 * len(text)
+            dy = -9 if p[1] <= img.shape[0] // 2 else 15
+            cv2.putText(layer, text, (p[0] + dx, p[1] + dy), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (120, 90, 0), 1, cv2.LINE_AA)
+        cv2.addWeighted(layer, 0.75, img, 0.25, 0, img)
 
     def write_frame(self, img):
         if self.record_path is None:
@@ -1014,8 +1114,35 @@ class RouteFollower:
             else:
                 self.pose, self.home = Pose2D(known.x, known.y, known.yaw), known
                 source = "map home (start fix disagrees; ignoring it)"
+        # A tag fix in the corner can be 10 cm off (the tags are close and seen at a steep angle). A home that puts
+        # the body through a wall is not a place the car can park: parking would back into the wall for ever.
+        self.home_open_loop = False
+        fitted = self.fit_in_arena(self.home, HOME_WALL_MARGIN_M)
+        if math.hypot(fitted.x - self.home.x, fitted.y - self.home.y) > 0.01:
+            if known is not None:
+                print(f"home pose x={self.home.x:.2f} y={self.home.y:.2f} would put the body through a wall (the "
+                      f"tags are too close in the corner); home is the map's x={known.x:.2f} y={known.y:.2f}, and "
+                      f"parking goes to the lane start first and backs in from there", flush=True)
+                self.home = Pose2D(known.x, known.y, known.yaw)
+                self.home_open_loop = True
+            else:
+                print(f"home pose x={self.home.x:.2f} y={self.home.y:.2f} would put the body through a wall; "
+                      f"using x={fitted.x:.2f} y={fitted.y:.2f}", flush=True)
+                self.home = fitted
+            if self.pose is not None:
+                self.pose = Pose2D(self.home.x, self.home.y, self.pose.yaw, self.pose.stamp, self.pose.fixes,
+                                   self.pose.rms_px)
         print(f"home pose x={self.home.x:.2f} y={self.home.y:.2f} yaw={self.home.yaw_deg:+.0f}deg "
               f"[{source}]", flush=True)
+
+    def fit_in_arena(self, pose: Pose2D, margin: float) -> Pose2D:
+        """`pose` moved the shortest way until the whole body is `margin` inside the arena walls."""
+        w, h = (float(v) for v in self.arena["arena_size_m"])
+        hl, hw = self.body_half
+        c, s = abs(math.cos(pose.yaw)), abs(math.sin(pose.yaw))
+        ex, ey = c * hl + s * hw + margin, s * hl + c * hw + margin
+        return Pose2D(min(max(pose.x, ex), w - ex), min(max(pose.y, ey), h - ey), pose.yaw, pose.stamp, pose.fixes,
+                      pose.rms_px)
 
     def averaged_fix(self, n: int) -> Pose2D | None:
         fixes = [f for f in (self.localize() for _ in range(n)) if f is not None]
@@ -1114,6 +1241,21 @@ class RouteFollower:
         self.save_look(views)
         self.log_look(views)
         return obstacle, wall
+
+    def wide_sweep(self, out: float, nose: float, half: float) -> None:
+        """Right up against the block: the gimbal sweeps from the far left to the far right once.
+
+        Only a measurement so far: the foot points of the whole sweep (no "at least this near" points) say how far
+        the block reaches sideways, which is printed beside the strafe the normal looks asked for, and every frame is
+        saved (looks/) to compare with where the block really is. The car's decisions do not use it yet.
+        """
+        views = self.scanner.scan(self.aim, WIDE_PANS)
+        self.log_look(views)
+        feet = [v.points[~np.isnan(v.points[:, 0])] for v in views]
+        points = np.vstack(feet) if feet else np.zeros((0, 2))
+        obstacle, _wall = split_walls(points, self.pose, self.arena["arena_size_m"])
+        need = shift_to_clear(obstacle, out, nose, half, CLEAR_MARGIN_M) if len(obstacle) else 0.0
+        print(f"    full sweep ({len(obstacle)} foot points on the block): would strafe {need * 100:.0f}cm", flush=True)
 
     def log_look(self, views) -> None:
         """Every look kept for replay: the frames, and the pose they were taken at (debug_dir/looks)."""
@@ -1384,11 +1526,23 @@ class RouteFollower:
                 self.face(yaw, 2.0)  # a strafe turns the car; the path ahead is judged square to the lane
                 obstacle, _wall = self.look_around()
                 if attempt == 0:
+                    self.wide_sweep(out, nose, half)
                     for block in self.obstacles.blocks:
                         if block.get("last_scan") == self.obstacles.scans:
                             print(f"    {self.obstacles.describe(block, target)}", flush=True)
                             passing = np.vstack([passing, block["points"]])
-                need = shift_to_clear(obstacle, out, nose, half, CLEAR_MARGIN_M)
+                judged = obstacle
+                if gap < BLIND_SLANT_GAP_M:
+                    # Right up against the block the camera is blind to its foot: the slanted looks (pan +-30) only
+                    # give "at least this near" points that are stretched sideways (10 cm too far, a 19 cm strafe
+                    # for a 9 cm need). The straight look has the true edge.
+                    straight = [v for v in self.last_views if abs(v.pan) < 1.0]
+                    pts = [v.points[~np.isnan(v.points[:, 0])] for v in straight] + [v.close for v in straight if len(v.close)]
+                    if pts:
+                        centre_only, _w = split_walls(np.vstack(pts), self.pose, self.arena["arena_size_m"])
+                        if len(centre_only):
+                            judged = centre_only
+                need = shift_to_clear(judged, out, nose, half, CLEAR_MARGIN_M)
                 if need <= 0.012:
                     break
                 if off_lane() - start + need > self.args.detour_max_m:
@@ -1517,6 +1671,7 @@ class RouteFollower:
             print(f"    blocked ({reason}) while parking; stopping here", flush=True)
             return True
 
+        aligns = 0  # squaring-up turns since the last drive
         for attempt in range(1, attempts + 1):
             if self.stop_event.is_set():
                 raise Abort("stopped")
@@ -1557,12 +1712,20 @@ class RouteFollower:
                             return False
             elif abs(dyaw) > tol_yaw:
                 self.turn_by(dyaw, min_s=0.05)
+            elif self.args.hug and not parking and ahead > 0.30 and aligns < 3 \
+                    and abs(dyaw) > math.radians(DEPART_TOL_DEG):
+                # About to drive a lane: first square the car up, so the lane is not started at the 4 deg that
+                # the turn tolerance lets through.
+                aligns += 1
+                print(f"    squaring up before the lane: heading {math.degrees(dyaw):+.1f}deg off ({aligns}/3)", flush=True)
+                self.turn_by(dyaw, min_s=0.03)
             elif abs(left) > lane and (abs(left) >= abs(ahead) or abs(left) > self.args.lane_tol_m) \
                     and self.strafe(left):
                 self.record()
                 self.save_map()
                 continue
             else:
+                aligns = 0
                 step = self.safe_step(max(-self.args.max_segment_m, min(self.args.max_segment_m, ahead)))
                 detour = self.args.hug and self.args.detour and not parking and step > 0
                 if detour:
@@ -1607,6 +1770,9 @@ class RouteFollower:
                 finally:
                     self.closing_cm = None
                     self.closing_ir_after = None
+                if detour and gap is not None:
+                    print(f"    closing move: asked {step * 100:.0f}cm, drove {_elapsed * float(self.motion['forward_mps']) * 100:.0f}cm "
+                          f"by the clock ({reason or 'no stop'}); pose x={self.pose.x:.2f} y={self.pose.y:.2f}", flush=True)
                 if reason:
                     self.closed_in = None
                 if reason and detour:
@@ -1640,11 +1806,18 @@ class RouteFollower:
         home = self.home
         print(f"parking at home x={home.x:.2f} y={home.y:.2f} yaw={home.yaw_deg:+.0f}deg", flush=True)
         self.sweep_correct()
-        self.allow_gap = max(self.clearance(home.x, home.y, home.yaw) - 0.01, -0.03)
+        self.allow_gap = max(self.clearance(home.x, home.y, home.yaw) - 0.01, 0.0)  # never into the wall
         self.parking = True
         try:
-            ok = self.go_pose("park", (home.x, home.y, home.yaw), self.args.home_tol_m,
-                              self.args.home_tol_deg, attempts=30, parking=True)
+            if self.home_open_loop and self.hug_poses:
+                # The tags are good at the lane start, 10 cm out of the corner, and bad in the corner itself. Stop
+                # exactly on the lane start, then do the one move from there to home by dead reckoning.
+                stage = self.hug_poses[0]
+                self.go_pose("park-stage", stage, 0.02, 3.0, attempts=20, parking=True)
+                ok = self.back_into_home()
+            else:
+                ok = self.go_pose("park", (home.x, home.y, home.yaw), self.args.home_tol_m,
+                                  self.args.home_tol_deg, attempts=30, parking=True)
         finally:
             self.allow_gap = None
             self.parking = False
@@ -1654,6 +1827,24 @@ class RouteFollower:
         print(f"{'parked at home' if ok else 'WARNING: parked near home'} "
               f"(off by {off * 100:.1f}cm, {dyaw:+.1f}deg)", flush=True)
         self.save_map()
+
+    def back_into_home(self) -> bool:
+        """From the lane start to home in two dead-reckoned moves (strafe, then back up), never into a wall."""
+        p, home = self.pose, self.home
+        c, s = math.cos(p.yaw), math.sin(p.yaw)
+        dx, dy = home.x - p.x, home.y - p.y
+        ahead, left = dx * c + dy * s, -dx * s + dy * c
+        print(f"    from the lane start to home: {abs(left) * 100:.0f}cm {'left' if left > 0 else 'right'}, "
+              f"{abs(ahead) * 100:.0f}cm {'forward' if ahead > 0 else 'back'}", flush=True)
+        side = self.safe_step(left, sideways=True)
+        if abs(side) >= 0.005:
+            self.move("strafe_left" if side > 0 else "strafe_right", abs(side) / self.strafe_mps)
+            self.face(home.yaw, 2.0)  # the strafe turned the car; the rear corner is 4 cm from the wall
+        ahead = (home.x - self.pose.x) * c + (home.y - self.pose.y) * s
+        step = self.safe_step(ahead)
+        if abs(step) >= 0.005:
+            self.move("forward" if step > 0 else "reverse", abs(step) / float(self.motion["forward_mps"]))
+        return abs(side - left) < 0.02 and abs(step - ahead) < 0.02
 
     def build_hug_poses(self) -> list[tuple[float, float, float]]:
         """Counter-clockwise wall-hugging lap as (x, y, yaw) poses.

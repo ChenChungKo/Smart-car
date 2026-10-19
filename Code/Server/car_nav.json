@@ -61,7 +61,7 @@
     "turn_left_dps": 64.03,
     "turn_right_dps": 64.78,
     "strafe_pwm": 1200,
-    "strafe_mps": 0.113,
+    "strafe_mps": 0.131,
     "drift_left_deg_per_m": 0.8,
     "calibrated": true
   },
