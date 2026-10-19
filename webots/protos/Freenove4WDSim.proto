@@ -1,0 +1,138 @@
+#VRML_SIM R2025a utf8
+# Freenove 4WD (mecanum) for running Code/Server/route_follow.py in Webots, z-up (ENU) worlds.
+#
+# Kinematic: no Physics node. The supervisor controller moves the car to where the commanded
+# motion takes it, so mecanum strafes work without simulating the rollers. Dimensions and sensor
+# positions follow Code/Server/car_nav.json (car frame: x forward, y left, z up, origin at the
+# body centre on the floor).
+#
+#   EXTERNPROTO "../protos/Freenove4WDSim.proto"
+#   Freenove4WDSim { translation -0.515 -0.56 0 }      # arena_map.json home in a world centred on the arena
+
+PROTO Freenove4WDSim [
+  field SFVec3f    translation     0 0 0
+  field SFRotation rotation        0 0 1 0
+  field SFString   name            "Freenove4WD"
+  field SFString   controller      "route_follow_webots"
+  field MFString   controllerArgs  []
+  field SFBool     supervisor      TRUE
+  field SFBool     synchronization TRUE
+]
+{
+  Robot {
+    translation IS translation
+    rotation IS rotation
+    name IS name
+    controller IS controller
+    controllerArgs IS controllerArgs
+    supervisor IS supervisor
+    synchronization IS synchronization
+    children [
+      # ---- body (0.29 x 0.18 m with the wheels) ----
+      Pose {
+        translation 0 0 0.055
+        children [
+          Shape {
+            appearance PBRAppearance { baseColor 0.75 0.1 0.1 roughness 0.6 metalness 0 }
+            geometry Box { size 0.25 0.12 0.04 }
+          }
+        ]
+      }
+      Pose {
+        translation 0 0 0.085
+        children [
+          Shape {
+            appearance PBRAppearance { baseColor 0.1 0.35 0.15 roughness 0.8 metalness 0 }
+            geometry Box { size 0.2 0.1 0.012 }
+          }
+        ]
+      }
+      DEF WHEEL Pose {
+        translation 0.08 0.079 0.0325
+        rotation 1 0 0 1.5708
+        children [
+          DEF WHEEL_SHAPE Shape {
+            appearance PBRAppearance { baseColor 0.1 0.1 0.1 roughness 1 metalness 0 }
+            geometry Cylinder { height 0.022 radius 0.0325 }
+          }
+        ]
+      }
+      Pose { translation -0.08 0.079 0.0325 rotation 1 0 0 1.5708 children [ USE WHEEL_SHAPE ] }
+      Pose { translation 0.08 -0.079 0.0325 rotation 1 0 0 1.5708 children [ USE WHEEL_SHAPE ] }
+      Pose { translation -0.08 -0.079 0.0325 rotation 1 0 0 1.5708 children [ USE WHEEL_SHAPE ] }
+
+      # ---- IR obstacle sensors (route_follow names with "ir_" in front); about 8 cm range ----
+      Pose { translation 0.145 0 0.04
+        children [ DistanceSensor { name "ir_front" type "generic" lookupTable [ 0 0 0, 0.3 0.3 0 ] } ] }
+      Pose { translation 0.145 0.07 0.04
+        children [ DistanceSensor { name "ir_front_left" type "generic" lookupTable [ 0 0 0, 0.3 0.3 0 ] } ] }
+      Pose { translation 0.145 -0.07 0.04
+        children [ DistanceSensor { name "ir_front_right" type "generic" lookupTable [ 0 0 0, 0.3 0.3 0 ] } ] }
+      Pose { translation 0.08 0.09 0.04 rotation 0 0 1 1.5708
+        children [ DistanceSensor { name "ir_wheel_left_front" type "generic" lookupTable [ 0 0 0, 0.3 0.3 0 ] } ] }
+      Pose { translation -0.08 0.09 0.04 rotation 0 0 1 1.5708
+        children [ DistanceSensor { name "ir_wheel_left_rear" type "generic" lookupTable [ 0 0 0, 0.3 0.3 0 ] } ] }
+      Pose { translation 0.08 -0.09 0.04 rotation 0 0 1 -1.5708
+        children [ DistanceSensor { name "ir_wheel_right_front" type "generic" lookupTable [ 0 0 0, 0.3 0.3 0 ] } ] }
+      Pose { translation -0.08 -0.09 0.04 rotation 0 0 1 -1.5708
+        children [ DistanceSensor { name "ir_wheel_right_rear" type "generic" lookupTable [ 0 0 0, 0.3 0.3 0 ] } ] }
+
+      # ---- fixed cameras (car_nav.json camera_mounts); fisheye, off unless the controller enables them ----
+      Pose { translation 0.112 0 0.037 rotation 0 1 0 0.2513
+        children [ Camera { name "cam_front" width 320 height 240 fieldOfView 3.14 projection "spherical" near 0.01 } ] }
+      Pose { translation -0.114 0 0.064 rotation 0 0 1 3.14159
+        children [ Pose { rotation 0 1 0 0.2286
+          children [ Camera { name "cam_rear" width 320 height 240 fieldOfView 3.14 projection "spherical" near 0.01 } ] } ] }
+      Pose { translation 0 0.09 0.08 rotation 0 0 1 1.5708
+        children [ Pose { rotation 0 1 0 0.2618
+          children [ Camera { name "cam_left" width 320 height 240 fieldOfView 2.6 projection "spherical" near 0.01 } ] } ] }
+      Pose { translation 0 -0.09 0.08 rotation 0 0 1 -1.5708
+        children [ Pose { rotation 0 1 0 0.2618
+          children [ Camera { name "cam_right" width 320 height 240 fieldOfView 2.6 projection "spherical" near 0.01 } ] } ] }
+
+      # ---- gimbal: pan servo 8.5 cm ahead of the centre; ultrasonic 3 cm in front of the pan axis ----
+      HingeJoint {
+        jointParameters HingeJointParameters {
+          axis 0 0 1
+          anchor 0.085 0 0.10
+        }
+        device [
+          RotationalMotor {
+            name "servo_pan"
+            maxVelocity 6
+            minPosition -1.75
+            maxPosition 1.75
+            maxTorque 10
+          }
+        ]
+        endPoint Solid {
+          translation 0.085 0 0.10
+          name "gimbal"
+          children [
+            Shape {
+              appearance PBRAppearance { baseColor 0.15 0.15 0.15 roughness 1 metalness 0 }
+              geometry Box { size 0.03 0.045 0.02 }
+            }
+            Pose {
+              translation 0.03 0 0
+              children [
+                DistanceSensor {
+                  name "sonic"
+                  type "sonar"
+                  lookupTable [ 0.02 0.02 0, 3 3 0 ]
+                  numberOfRays 5
+                  aperture 0.28
+                }
+              ]
+            }
+            Pose {
+              translation 0.02 0 0
+              rotation 0 1 0 -0.0262
+              children [ Camera { name "cam_gimbal" width 320 height 240 fieldOfView 2.6 projection "spherical" near 0.01 } ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

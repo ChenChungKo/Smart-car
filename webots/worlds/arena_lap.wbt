@@ -1,0 +1,261 @@
+#VRML_SIM R2025a utf8
+# Wall-hugging lap with one foam block in the middle of each wall's lane (route_sim.py --layout lap).
+# The arena is 1.4 m inside, centred on the world origin: arena_map.json (x, y) = world (x - 0.70, y - 0.70).
+# Move a block by dragging it (keep it on the floor); the controller reads every Solid's outline at start.
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/Floor.proto"
+EXTERNPROTO "../protos/Freenove4WDSim.proto"
+
+WorldInfo {
+  title "Freenove 4WD lap with detours"
+  basicTimeStep 16
+}
+Viewpoint {
+  orientation -0.40937661589008384 0.3802471804545262 0.8293508715367492 1.828817912150714
+  position 0.13104355047718103 -2.1178897775079135 2.6576507827412263
+}
+TexturedBackground {
+}
+TexturedBackgroundLight {
+}
+Floor {
+  size 1.5 1.5
+  appearance PBRAppearance {
+    baseColor 0.88 0.88 0.88
+    roughness 0.9
+    metalness 0
+  }
+}
+Solid {
+  translation -0.375 0.725 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.3 0.3
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.75 0.05 0.15
+      }
+    }
+  ]
+  name "wall_top_1"
+  boundingObject Box {
+    size 0.75 0.05 0.15
+  }
+}
+Solid {
+  translation 0.375 0.725 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.3 0.3
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.75 0.05 0.15
+      }
+    }
+  ]
+  name "wall_top_2"
+  boundingObject Box {
+    size 0.75 0.05 0.15
+  }
+}
+Solid {
+  translation -0.725 0.35 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.3 0.3
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.05 0.7 0.15
+      }
+    }
+  ]
+  name "wall_left_1"
+  boundingObject Box {
+    size 0.05 0.7 0.15
+  }
+}
+Solid {
+  translation -0.725 -0.35 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.3 0.3
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.05 0.7 0.15
+      }
+    }
+  ]
+  name "wall_left_2"
+  boundingObject Box {
+    size 0.05 0.7 0.15
+  }
+}
+Solid {
+  translation -0.375 -0.725 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.6 0.9
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.75 0.05 0.15
+      }
+    }
+  ]
+  name "wall_bottom_1"
+  boundingObject Box {
+    size 0.75 0.05 0.15
+  }
+}
+Solid {
+  translation 0.375 -0.725 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.6 0.9
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.75 0.05 0.15
+      }
+    }
+  ]
+  name "wall_bottom_2"
+  boundingObject Box {
+    size 0.75 0.05 0.15
+  }
+}
+Solid {
+  translation 0.725 0.35 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.6 0.9
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.05 0.7 0.15
+      }
+    }
+  ]
+  name "wall_right_1"
+  boundingObject Box {
+    size 0.05 0.7 0.15
+  }
+}
+Solid {
+  translation 0.725 -0.35 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.6 0.9
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.05 0.7 0.15
+      }
+    }
+  ]
+  name "wall_right_2"
+  boundingObject Box {
+    size 0.05 0.7 0.15
+  }
+}
+Solid {
+  translation 0 -0.52 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.6 0.9
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.1 0.2 0.15
+      }
+    }
+  ]
+  name "block_bottom"
+  boundingObject Box {
+    size 0.1 0.2 0.15
+  }
+}
+Solid {
+  translation 0.52 -0.05 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.3 0.3
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.2 0.1 0.15
+      }
+    }
+  ]
+  name "block_right"
+  boundingObject Box {
+    size 0.2 0.1 0.15
+  }
+}
+Solid {
+  translation 0 0.53 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.6 0.9
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.2 0.1 0.15
+      }
+    }
+  ]
+  name "block_top"
+  boundingObject Box {
+    size 0.2 0.1 0.15
+  }
+}
+Solid {
+  translation -0.55 0 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.3 0.3
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.1 0.2 0.15
+      }
+    }
+  ]
+  name "block_left"
+  boundingObject Box {
+    size 0.1 0.2 0.15
+  }
+}
+Freenove4WDSim {
+  translation -0.515 -0.56 0
+}

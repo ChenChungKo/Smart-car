@@ -1,0 +1,445 @@
+#VRML_SIM R2025a utf8
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/Floor.proto"
+
+WorldInfo {
+}
+Viewpoint {
+  orientation -0.40937661589008384 0.3802471804545262 0.8293508715367492 1.828817912150714
+  position 0.13104355047718103 -2.1178897775079135 2.6576507827412263
+}
+TexturedBackground {
+}
+TexturedBackgroundLight {
+}
+Floor {
+  size 1.5 1.5
+  appearance PBRAppearance {
+    baseColor 0.88 0.88 0.88
+    roughness 0.9
+    metalness 0
+  }
+}
+Solid {
+  translation -0.375 0.725 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.3 0.3
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.75 0.05 0.15
+      }
+    }
+  ]
+  name "wall_top_1"
+  boundingObject Box {
+    size 0.75 0.05 0.15
+  }
+}
+Solid {
+  translation 0.375 0.725 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.3 0.3
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.75 0.05 0.15
+      }
+    }
+  ]
+  name "wall_top_2"
+  boundingObject Box {
+    size 0.75 0.05 0.15
+  }
+}
+Solid {
+  translation -0.725 0.35 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.3 0.3
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.05 0.7 0.15
+      }
+    }
+  ]
+  name "wall_left_1"
+  boundingObject Box {
+    size 0.05 0.7 0.15
+  }
+}
+Solid {
+  translation -0.725 -0.35 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.3 0.3
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.05 0.7 0.15
+      }
+    }
+  ]
+  name "wall_left_2"
+  boundingObject Box {
+    size 0.05 0.7 0.15
+  }
+}
+Solid {
+  translation -0.375 -0.725 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.6 0.9
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.75 0.05 0.15
+      }
+    }
+  ]
+  name "wall_bottom_1"
+  boundingObject Box {
+    size 0.75 0.05 0.15
+  }
+}
+Solid {
+  translation 0.375 -0.725 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.6 0.9
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.75 0.05 0.15
+      }
+    }
+  ]
+  name "wall_bottom_2"
+  boundingObject Box {
+    size 0.75 0.05 0.15
+  }
+}
+Solid {
+  translation 0.725 0.35 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.6 0.9
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.05 0.7 0.15
+      }
+    }
+  ]
+  name "wall_right_1"
+  boundingObject Box {
+    size 0.05 0.7 0.15
+  }
+}
+Solid {
+  translation 0.725 -0.35 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.6 0.9
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.05 0.7 0.15
+      }
+    }
+  ]
+  name "wall_right_2"
+  boundingObject Box {
+    size 0.05 0.7 0.15
+  }
+}
+Solid {
+  translation -0.575 0.575 0.0375
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.3 0.3
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.25 0.25 0.075
+      }
+    }
+  ]
+  name "platform_high_grey"
+  boundingObject Box {
+    size 0.25 0.25 0.075
+  }
+}
+Solid {
+  translation -0.325 0.575 0
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.3 0.3
+        roughness 1
+        metalness 0
+      }
+      geometry DEF WEDGE_RAMP IndexedFaceSet {
+        coord Coordinate {
+          point [
+            -0.125 -0.125 0
+            0.125 -0.125 0
+            0.125 0.125 0
+            -0.125 0.125 0
+            -0.125 -0.125 0.075
+            -0.125 0.125 0.075
+          ]
+        }
+        coordIndex [
+          0, 3, 2, 1, -1, 0, 4, 5, 3, -1
+          0, 1, 4, -1, 3, 5, 2, -1, 4, 1
+          2, 5, -1
+        ]
+      }
+    }
+  ]
+  name "ramp_right_grey"
+  boundingObject USE WEDGE_RAMP
+}
+Solid {
+  translation -0.575 0.325 0
+  rotation 0 0 1 -1.5708
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.3 0.3
+        roughness 1
+        metalness 0
+      }
+      geometry USE WEDGE_RAMP
+    }
+  ]
+  name "ramp_down_grey"
+  boundingObject USE WEDGE_RAMP
+}
+Solid {
+  translation 0.25 0.2 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.3 0.3
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.5 0.1 0.15
+      }
+    }
+  ]
+  name "fork_bar_A"
+  boundingObject Box {
+    size 0.5 0.1 0.15
+  }
+}
+Solid {
+  translation 0.05 0.35 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.3 0.3
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.1 0.2 0.15
+      }
+    }
+  ]
+  name "fork_leg_left_B"
+  boundingObject Box {
+    size 0.1 0.2 0.15
+  }
+}
+Solid {
+  translation 0.45 0.35 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.3 0.3
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.1 0.2 0.15
+      }
+    }
+  ]
+  name "fork_leg_right_B"
+  boundingObject Box {
+    size 0.1 0.2 0.15
+  }
+}
+Solid {
+  translation 0.25 0.05 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.3 0.3
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.1 0.2 0.15
+      }
+    }
+  ]
+  name "fork_leg_down_B"
+  boundingObject Box {
+    size 0.1 0.2 0.15
+  }
+}
+Solid {
+  translation -0.4 -0.45 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.6 0.9
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.2 0.1 0.15
+      }
+    }
+  ]
+  name "pinwheel_bottom_B"
+  boundingObject Box {
+    size 0.2 0.1 0.15
+  }
+}
+Solid {
+  translation -0.25 -0.4 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.6 0.9
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.1 0.2 0.15
+      }
+    }
+  ]
+  name "pinwheel_right_B"
+  boundingObject Box {
+    size 0.1 0.2 0.15
+  }
+}
+Solid {
+  translation -0.3 -0.25 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.6 0.9
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.2 0.1 0.15
+      }
+    }
+  ]
+  name "pinwheel_top_B"
+  boundingObject Box {
+    size 0.2 0.1 0.15
+  }
+}
+Solid {
+  translation -0.45 -0.3 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.6 0.9
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.1 0.2 0.15
+      }
+    }
+  ]
+  name "pinwheel_left_B"
+  boundingObject Box {
+    size 0.1 0.2 0.15
+  }
+}
+Solid {
+  translation 0.575 -0.575 0.0375
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.6 0.9
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.25 0.25 0.075
+      }
+    }
+  ]
+  name "platform_high_blue"
+  boundingObject Box {
+    size 0.25 0.25 0.075
+  }
+}
+Solid {
+  translation 0.325 -0.575 0
+  rotation 0 0 1 3.14159
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.6 0.9
+        roughness 1
+        metalness 0
+      }
+      geometry USE WEDGE_RAMP
+    }
+  ]
+  name "ramp_left_blue"
+  boundingObject USE WEDGE_RAMP
+}
+Solid {
+  translation 0.575 -0.325 0
+  rotation 0 0 1 1.5708
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.3 0.6 0.9
+        roughness 1
+        metalness 0
+      }
+      geometry USE WEDGE_RAMP
+    }
+  ]
+  name "ramp_up_blue"
+  boundingObject USE WEDGE_RAMP
+}

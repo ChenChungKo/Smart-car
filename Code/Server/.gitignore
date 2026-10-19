@@ -3,3 +3,7 @@
 models/*.onnx
 models/*.pt
 vision_cruise_debug/
+
+# Simulator output (route_sim.py, Webots route_follow_webots).
+route_sim_debug/
+route_follow_webots_debug/
