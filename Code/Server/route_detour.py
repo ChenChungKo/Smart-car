@@ -233,7 +233,7 @@ class DetourMixin:
             p = self.pose
             wall_gap = self.wall_distance(p.x, p.y, p.yaw - out * math.pi / 2.0) - self.body_half[1]  # body edge to wall
             if err > 0.10 and wall_gap > 0.12 and self.sensors is not None \
-                    and any(self.sensors.read_ir().get(k) for k in ir_keys):
+                    and any(self.sensors.read_ir().get(k) for k in ir_keys) and self.ir_is_obstacle(-90.0 * out):
                 print(f"    {wall_side} IR sees the obstacle; forward 6cm before strafing back", flush=True)
                 if not forward_to(along() + 0.06):
                     raise Abort("detour: obstacle beside the car and no room to go further")
@@ -244,6 +244,16 @@ class DetourMixin:
             self.record()
             self.save_map()
         print(f"    back on the lane ({off_lane() * 100:+.0f}cm)", flush=True)
+
+    def ir_is_obstacle(self, pan: float) -> bool:
+        """A wheel IR on the wall side is lit: is something within reach of the body there, or is it the wall?
+
+        The IR modules can see a wall 17-20 cm away (one stayed lit for good with the car 20 cm from the wall, and the
+        detour took it for the block and gave up). The ultrasonic turned to that side tells: a block the IR sees
+        is within ~8 cm of the body, a reading of 15 cm or more from the pivot is farther than that.
+        """
+        reading, _wall = self.side_range(pan)
+        return reading is not None and reading < 0.15
 
     def beyond_spot(self, gap: float | None, target) -> bool:
         """True when the obstacle `gap` ahead (from the ultrasonic face) lies past `target`: the body fits at it."""
