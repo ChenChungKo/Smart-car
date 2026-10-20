@@ -22,13 +22,9 @@ import numpy as np
 
 WALL_BAND_M = 0.07   # a foot this close to a wall is the wall (more for far feet, see `wall_band`)
 CAMERA_X_M = 0.10    # the gimbal camera, ahead of the car centre: far feet are less exact
-DEPTH_20_FROM_M = 0.125   # a face seen this far from the wall (95th percentile) is the end of a block standing out from it
-WALL_LIKE_M = 0.085   # foot points whose median is nearer a wall than this are taken for the wall, not for a block
 MAP_RANGE_M = 0.36   # only feet this near the camera make blocks: farther, a wall's foot is off by more than its band
 OUTSIDE_M = 0.04     # a foot this far beyond a wall is something outside the arena (people, a fridge)
 CLUSTER_GAP_M = 0.045
-BLOCK_REACH_M = 0.22     # foot points farther than this from the middle of a cluster are not the same block
-BLOCK_AREA_MAX_M2 = 0.035  # a 20 x 10 cm block is 0.02; the carried-out outline of one may not be much bigger
 MERGE_M = 0.22       # two looks this close are one block: the pose drifts 10-20 cm between lanes
 
 
@@ -138,6 +134,12 @@ class ObstacleMap:
     def __init__(self, size, block=(0.20, 0.10)):
         self.w, self.h = (float(v) for v in size)
         self.block = (max(block), min(block))  # long and short side of one foam block
+        long_side, short_side = self.block
+        # Every size threshold follows from the block, so another block size is one setting (obstacle_block_m).
+        self.end_on_from = short_side + 0.25 * (long_side - short_side)  # a face this far from the wall (95th pct) is a block's end
+        self.wall_like = 0.85 * short_side       # foot points nearer a wall than this (median) are the wall, not a block
+        self.reach = 1.1 * long_side             # foot points farther than this from the middle of a cluster are another block
+        self.area_max = 1.75 * long_side * short_side  # a carried-out outline larger than this is not one block
         self.blocks: list[dict] = []
         self.next_id = 1
         self.scan_obstacle = np.zeros((0, 2))
@@ -223,7 +225,7 @@ class ObstacleMap:
         seen_depth = float(np.percentile(np.abs(pts[:, axis] - wall_at), 95))
         if seen_depth > 0.28:
             return None  # deeper than a block: two blocks, or a wall
-        depth = self.block[0] if seen_depth >= DEPTH_20_FROM_M else self.block[1]
+        depth = self.block[0] if seen_depth >= self.end_on_from else self.block[1]
         width = self.block[1] if depth == self.block[0] else self.block[0]
         along = 1 - axis
         centre = float(np.median(pts[:, along]))
@@ -242,7 +244,7 @@ class ObstacleMap:
         carry-out to the wall is skipped when it would make an outline larger than a block could be.
         """
         centre = np.median(pts, axis=0)
-        near = np.hypot(*(pts - centre).T) <= BLOCK_REACH_M
+        near = np.hypot(*(pts - centre).T) <= self.reach
         pts = pts[near] if near.sum() >= 4 else pts
         box = self._wall_box(pts)
         if box is not None:
@@ -261,7 +263,7 @@ class ObstacleMap:
             hull_pts = np.vstack([pts, proj])
         hull = cv2.convexHull((hull_pts * 100.0).astype(np.float32)).reshape(-1, 2) / 100.0
         area = float(cv2.contourArea((hull * 100.0).astype(np.float32))) / 1e4
-        return hull if area <= BLOCK_AREA_MAX_M2 else plain
+        return hull if area <= self.area_max else plain
 
     # ---- reading it -------------------------------------------------------
 
@@ -278,7 +280,7 @@ class ObstacleMap:
         """The blocks the map shows: seen near enough, enough times, and not just a wall's own foot line."""
         return [b for b in self.blocks if b.get("near_hits", 0) >= min_hits and "outline" in b
                 # a line a few cm off a wall is that wall's foot, seen from a pose that is a few cm off
-                and float(np.median(inner_distance(b["draw_points"], (self.w, self.h)))) >= WALL_LIKE_M]
+                and float(np.median(inner_distance(b["draw_points"], (self.w, self.h)))) >= self.wall_like]
 
     def as_dict(self) -> list[dict]:
         return [{"id": b["id"], "hits": b["hits"], "centre_m": [round(float(v), 3) for v in b["centre"]],
@@ -287,7 +289,7 @@ class ObstacleMap:
     # ---- drawing ----------------------------------------------------------
 
     def draw(self, img: np.ndarray, size_px: int = 640, margin: int = 30, min_hits: int = 3,
-             show_walls: bool = False) -> np.ndarray:
+             show_walls: bool = False, show_scan: bool = False) -> np.ndarray:
         """Draw onto route_follow's map image (aruco_localizer.draw_map: margin 30, 640 px)."""
         scale = (size_px - 2 * margin) / max(self.w, self.h)
         floor_h = int(self.h * scale) + 2 * margin
@@ -318,6 +320,7 @@ class ObstacleMap:
                         cv2.LINE_AA)
             cv2.putText(img, f"B{shown}", (u - 10, v + 4), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1,
                         cv2.LINE_AA)
-        for p in self.scan_obstacle:
-            cv2.circle(img, px(p), 2, (0, 60, 255), -1)
+        if show_scan:  # the last look's raw points, unconfirmed: a check of the camera, not part of the map
+            for p in self.scan_obstacle:
+                cv2.circle(img, px(p), 2, (0, 60, 255), -1)
         return img

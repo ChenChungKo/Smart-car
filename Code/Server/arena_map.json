@@ -12,6 +12,7 @@
     "routes.perimeter：沿四面牆、車身中心離牆 24 cm（車側離牆約 15 cm）逆時針一圈；四角斜切 15 cm。車角到車心約 17 cm，原地轉向需要這個距離，再貼近就轉不過去。跑這條建議加 --stop-cm 8 --arrive-m 0.06。"
   ],
   "arena_size_m": [1.40, 1.40],
+  "obstacle_block_m": [0.20, 0.10],
   "tag_dictionary": "DICT_4X4_50",
   "tag_size_m": 0.1,
   "tags": [
