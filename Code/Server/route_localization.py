@@ -79,14 +79,11 @@ class LocalizationMixin:
         self.kalman.sync(self.pose.x, self.pose.y, self.pose.yaw)
         before = self.pose
         if self.kalman.update_tag(pose.x, pose.y, pose.yaw, len(pairs), nearest) == "outlier":
-            near_tag = any(f.distance < self.localizer.max_single_tag_m for f in pose.fixes)
+            strong = len(pairs) >= 3 or any(f.distance < self.localizer.max_single_tag_m for f in pose.fixes)
             last = self.jump_pose
             same = last is not None and math.hypot(pose.x - last.x, pose.y - last.y) < self.args.max_jump_m
             self.jumps = self.jumps + 1 if same else 1
             self.jump_pose = pose
-            # A near tag is believed at once. Three or more far tags are believed when a second fix agrees: one
-            # such fix can be 17 cm off (the car then "corrected" itself into a block); two in a row agree only if true.
-            strong = near_tag or (len(pairs) >= 3 and self.jumps >= 2)
             if not strong and (self.parking or self.jumps < 4):
                 sigma_xy, sigma_yaw = self.kalman.sigma()
                 print(f"  ignoring fix {pose.text()}: outside what the filter expects "

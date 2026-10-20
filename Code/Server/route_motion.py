@@ -72,6 +72,9 @@ class MotionMixin:
         if self.stop_event.is_set():
             raise Abort("stopped")
         self.dead_reckon(kind, elapsed)
+        if kind in ("forward", "reverse", "strafe_left", "strafe_right"):
+            print(f"      [{kind} {elapsed:.2f}s ({elapsed * float(self.motion['forward_mps']) * 100:.0f}cm at the calibrated speed)"
+                  f"{' stopped: ' + reason if reason else ''} -> pose x={self.pose.x:.3f} y={self.pose.y:.3f}]", flush=True)
         return elapsed, reason
 
     def turn_rate(self, kind: str) -> float:
