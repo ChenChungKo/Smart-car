@@ -292,8 +292,12 @@ class MotionMixin:
         self.strafe_wrong = 0
         if abs(side) < 0.03:
             return True
-        speed = min(max(abs(moved) / elapsed, 0.5 * self.strafe_base), 2.0 * self.strafe_base)
-        self.strafe_mps = 0.5 * self.strafe_mps + 0.5 * speed
+        # A strafe is 3-6 cm and a tag fix is good to a few cm, so one strafe says little about the speed: it swung
+        # 0.098 to 0.168 m/s on a run, and the strafes after a low value overshot by a third. Learn slowly (a quarter
+        # of the difference) and keep within 25 % of the calibration.
+        if getattr(self.args, "learn_motion", True):
+            speed = min(max(abs(moved) / elapsed, 0.75 * self.strafe_base), 1.25 * self.strafe_base)
+            self.strafe_mps = 0.75 * self.strafe_mps + 0.25 * speed
         print(f"    strafed {moved * 100:+.0f}cm (asked {side * 100:+.0f}cm); strafe speed now "
               f"{self.strafe_mps:.3f} m/s", flush=True)
         return True
