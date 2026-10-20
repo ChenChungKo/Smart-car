@@ -62,6 +62,13 @@ def main():
     car = RouteFollower(parse_args(["--arm", "--no-window", "--debug-dir", "route_follow_debug/calibrate"]))
     try:
         car.start()
+        # Check the whole placement before anything moves: ahead and to both sides (the sonic reads from the pivot).
+        ahead, to_left, to_right = wall_cm(car, 0.0), wall_cm(car, 90.0), wall_cm(car, -90.0)
+        car.look(0.0)
+        print(f"placement: wall ahead {ahead:.0f} cm, left {to_left:.0f} cm, right {to_right:.0f} cm "
+              f"(needs ahead >= 50, each side >= 40; the car should be in the middle, facing a wall squarely)", flush=True)
+        if ahead < 50 or min(to_left, to_right) < 40:
+            raise Abort("move the car: it is too close to a wall for the trials (nothing has moved yet)")
         forward, strafe, left, right = [], [], [], []
         for n in range(1, opts.trials + 1):
             # forward then back the same time: the car stays near where it was
