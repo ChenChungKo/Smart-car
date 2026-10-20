@@ -102,6 +102,7 @@ class DetourMixin:
                 gap -= back
 
         start, detected = off_lane(), along()
+        camera_blind = False  # the camera sees nothing where the ultrasonic found the obstacle: not to be believed
         if self.scanner is not None:
             # 1. The camera gives the obstacle's edge: strafe exactly as far as the body needs to clear it by
             # CLEAR_MARGIN_M, look again, and repeat if the first estimate was short.
@@ -110,7 +111,7 @@ class DetourMixin:
                 self.face(yaw, 2.0)  # a strafe turns the car; the path ahead is judged square to the lane
                 obstacle, _wall = self.look_around()
                 if attempt == 0:
-                    self.wide_sweep(out, nose, half)
+                    sweep_need = self.wide_sweep(out, nose, half)
                     for block in self.obstacles.blocks:
                         if block.get("last_scan") == self.obstacles.scans:
                             print(f"    {self.obstacles.describe(block, target)}", flush=True)
@@ -127,6 +128,19 @@ class DetourMixin:
                         if len(centre_only):
                             judged = centre_only
                 need = shift_to_clear(judged, out, nose, half, CLEAR_MARGIN_M)
+                if need <= 0.012 and attempt == 0:
+                    # The ultrasonic put an obstacle ahead and the looks see none (a dark grey block can drop out of the
+                    # foot-line finder at 8 cm: the car then drove on into it). Take the full sweep's estimate, and
+                    # with that empty too, find the edge with the ultrasonic instead.
+                    if sweep_need > 0.012:
+                        print(f"    the looks see a clear path but the ultrasonic does not; using the full sweep: "
+                              f"{sweep_need * 100:.0f}cm", flush=True)
+                        need = sweep_need
+                    else:
+                        print("    the camera sees nothing where the ultrasonic found an obstacle; "
+                              "going around by the ultrasonic", flush=True)
+                        camera_blind = True
+                        break
                 if need <= 0.012:
                     break
                 if off_lane() - start + need > self.args.detour_max_m:
@@ -151,8 +165,9 @@ class DetourMixin:
                     self.save_map()
             else:
                 raise Abort("detour: the camera still sees the path blocked after 6 looks")
-            print(f"    path clear, {(off_lane() - start) * 100:.0f}cm off the lane", flush=True)
-        else:
+            if not camera_blind:
+                print(f"    path clear, {(off_lane() - start) * 100:.0f}cm off the lane", flush=True)
+        if self.scanner is None or camera_blind:
             ahead = gap
             while True:
                 if off_lane() - start > self.args.detour_max_m:

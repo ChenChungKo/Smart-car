@@ -96,12 +96,13 @@ class PerceptionMixin:
         self.log_look(views)
         return obstacle, wall
 
-    def wide_sweep(self, out: float, nose: float, half: float) -> None:
+    def wide_sweep(self, out: float, nose: float, half: float) -> float:
         """Right up against the block: the gimbal sweeps from the far left to the far right once.
 
         Only a measurement so far: the foot points of the whole sweep (no "at least this near" points) say how far
         the block reaches sideways, which is printed beside the strafe the normal looks asked for, and every frame is
-        saved (looks/) to compare with where the block really is. The car's decisions do not use it yet.
+        saved (looks/). Its estimate is used only when the normal looks see a clear path where the ultrasonic found
+        an obstacle.
         """
         views = self.scanner.scan(self.aim, WIDE_PANS)
         self.log_look(views)
@@ -110,6 +111,7 @@ class PerceptionMixin:
         obstacle, _wall = split_walls(points, self.pose, self.arena["arena_size_m"])
         need = shift_to_clear(obstacle, out, nose, half, CLEAR_MARGIN_M) if len(obstacle) else 0.0
         print(f"    full sweep ({len(obstacle)} foot points on the block): would strafe {need * 100:.0f}cm", flush=True)
+        return need
 
     def log_look(self, views) -> None:
         """Every look kept for replay: the frames, and the pose they were taken at (debug_dir/looks)."""
