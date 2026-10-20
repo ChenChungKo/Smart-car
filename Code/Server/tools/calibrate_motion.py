@@ -4,7 +4,7 @@
     python3 tools/calibrate_motion.py            # measure, print, ask before writing car_nav.json
     python3 tools/calibrate_motion.py --trials 5 --yes
 
-Put the car in the middle of the arena facing a wall with 70 cm or more of free floor in front and 40 cm or more to
+Put the car in the middle of the arena facing a wall squarely with 80 cm or more of free floor in front and 40 cm or more to
 its left and right, with the arena tags in view of the front camera (the turn trials read the heading from them).
 
 Distances come from the ultrasonic against the walls, good to about 1 cm; a tag fix 1 m away is good to 5-8 cm,
@@ -39,6 +39,21 @@ def wall_cm(car: RouteFollower, pan: float, reads: int = 5) -> float:
     return st.median(values)
 
 
+def square_up(car: RouteFollower) -> float | None:
+    """Turn the car back to the nearest wall direction by the tags (a strafe turns it); returns the heading error left."""
+    for _ in range(3):
+        fix = car.localize(3.0)
+        if fix is None:
+            return None
+        car.pose = fix
+        target = round(fix.yaw / (math.pi / 2)) * (math.pi / 2)
+        err = wrap_rad(target - fix.yaw)
+        if abs(err) < math.radians(2.0):
+            return math.degrees(err)
+        car.turn_by(err, min_s=0.05)
+    return None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--trials", type=int, default=4)
@@ -50,9 +65,11 @@ def main():
         forward, strafe, left, right = [], [], [], []
         for n in range(1, opts.trials + 1):
             # forward then back the same time: the car stays near where it was
+            if square_up(car) is None:
+                print("  (no tag fix to square the car up; carrying on)", flush=True)
             d0 = wall_cm(car, 0.0)
-            if d0 < 70:
-                raise Abort(f"only {d0:.0f}cm to the wall ahead; move the car back")
+            if d0 < 50:
+                raise Abort(f"only {d0:.0f}cm to the wall ahead (the trial needs 50); move the car back")
             t, _ = car.move("forward", 1.5)
             d1 = wall_cm(car, 0.0)
             car.move("reverse", 1.5)
@@ -66,6 +83,7 @@ def main():
                 s1 = wall_cm(car, pan)
                 strafe.append(abs(s1 - s0) / 100.0 / t)
                 car.move("strafe_right" if kind == "strafe_left" else "strafe_left", 1.5)
+                square_up(car)  # a strafe turns the car: face the wall again before the next trial
             # turns, by the tag heading
             p0 = car.localize(3.0)
             if p0 is None:
