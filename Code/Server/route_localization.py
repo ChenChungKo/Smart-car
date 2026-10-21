@@ -302,7 +302,7 @@ class LocalizationMixin:
         """Range left, ahead and right; returns the angles that answered, in degrees."""
         found = {}
         try:
-            for angle in (60, 30, 0, -30, -60):
+            for angle in (90, 60, 30, 0, -30, -60, -90):  # +-90 hit the side wall square on: the surest echo
                 cm = self.look(angle)
                 if cm is not None:
                     found[angle] = cm

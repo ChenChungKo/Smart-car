@@ -268,6 +268,17 @@ class MotionMixin:
                 sonic = self.sensors.read_sonic() if self.sensors is not None else None
                 if sonic is not None:
                     side = math.copysign(min(abs(side), max(sonic / 100.0 - 0.04, 0.0) / along), side)
+        if self.parking and self.sensors is not None and self.servo is not None:
+            # Parking leaves 5 cm to the wall at the side, and the pose is only good to a few cm: measure that side
+            # square on with the ultrasonic (the pivot is ahead of the pose, the beam starts SONIC_ARM_M off the
+            # pivot) and never strafe closer than 3 cm to whatever it hits.
+            reading, _wall = self.side_range(90.0 if side > 0 else -90.0)
+            if reading is not None and reading < 0.40:
+                room = reading - (self.body_half[1] - SONIC_ARM_M) - 0.03
+                if abs(side) > room:
+                    print(f"    side ultrasonic: {reading * 100:.0f}cm to the wall; strafing only {max(room, 0) * 100:.0f}cm",
+                          flush=True)
+                    side = math.copysign(max(room, 0.0), side)
         side = self.safe_step(side, sideways=True)
         if abs(side) < 0.005:
             print("    wall beside the car; cannot strafe", flush=True)
