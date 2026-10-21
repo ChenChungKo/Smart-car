@@ -222,21 +222,23 @@ class LocalizationMixin:
             turn = abs(math.degrees(wrap_rad(measured.yaw - known.yaw)))
             print(f"map home x={known.x:.2f} y={known.y:.2f} yaw={known.yaw_deg:+.0f}deg; tags read "
                   f"{off * 100:.0f}cm / {turn:.0f}deg away", flush=True)
-            if off <= 0.15 and turn <= 20.0:
-                # The car starts where it was parked or put; the map home is where it is to come back to every lap,
-                # and the wall at its right measures that to a centimetre (the corner tags do not).
-                fit = self.fit_in_arena(measured, HOME_WALL_MARGIN_M)
-                if math.hypot(fit.x - measured.x, fit.y - measured.y) > 0.01:  # a start fix through the wall: not believed
-                    self.pose, self.home = Pose2D(known.x, known.y, known.yaw), Pose2D(known.x, known.y, known.yaw)
-                else:
-                    self.pose, self.home = measured, Pose2D(known.x, known.y, known.yaw)
-                self.wall_home = True
-                source = "map home (the car was put near it; parking measures the wall)"
+            # Wherever the car is put, it comes back to the map home. Where it is NOW is what the tags measure (a fix that
+            # puts the body through a wall is not believed: the corner tags are close and steep), and the wall at its
+            # right measures the home to a centimetre when it parks.
+            fit = self.fit_in_arena(measured, HOME_WALL_MARGIN_M)
+            if math.hypot(fit.x - measured.x, fit.y - measured.y) > 0.01:
+                self.pose = Pose2D(fit.x, fit.y, measured.yaw)   # nearest place the body fits: the car is somewhere near
+                source = "map home (the start fix is through a wall; the car is taken to be at x=%.2f y=%.2f)" % (
+                    fit.x, fit.y)
             else:
-                self.pose, self.home = Pose2D(known.x, known.y, known.yaw), known
-                source = "map home (start fix disagrees; ignoring it)"
+                self.pose = measured
+                source = "map home (the car is at x=%.2f y=%.2f yaw=%+.0fdeg by the tags)" % (
+                    measured.x, measured.y, measured.yaw_deg)
+            self.home = Pose2D(known.x, known.y, known.yaw)
+            self.wall_home = True
         # A tag fix in the corner can be 10 cm off (the tags are close and seen at a steep angle). A home that puts
         # the body through a wall is not a place the car can park: parking would back into the wall for ever.
+        self.wall_home = known is not None
         self.home_open_loop = self.wall_home  # corner tags are bad: stop on the lane start, then strafe and back in
         fitted = self.fit_in_arena(self.home, HOME_WALL_MARGIN_M)
         if math.hypot(fitted.x - self.home.x, fitted.y - self.home.y) > 0.01:
