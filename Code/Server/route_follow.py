@@ -91,6 +91,7 @@ class RouteFollower(MotionMixin, LocalizationMixin, PerceptionMixin, DetourMixin
         self.jumps = 0
         self.jump_pose: Pose2D | None = None
         self.parking = False
+        self.wall_home = False  # the home is the map's, parked by the wall at the right (park_by_wall)
         self.home_open_loop = False  # the home fix was not usable: park by a relative move from the lane start
         self.lane_yaw: float | None = None
         self.lane_check = False

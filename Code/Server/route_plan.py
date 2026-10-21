@@ -268,6 +268,8 @@ class PlanMixin:
             else:
                 ok = self.go_pose("park", (home.x, home.y, home.yaw), self.args.home_tol_m,
                                   self.args.home_tol_deg, attempts=30, parking=True)
+            if self.wall_home and ok:
+                self.park_by_wall()
         finally:
             self.allow_gap = None
             self.parking = False
@@ -277,6 +279,44 @@ class PlanMixin:
         print(f"{'parked at home' if ok else 'WARNING: parked near home'} "
               f"(off by {off * 100:.1f}cm, {dyaw:+.1f}deg)", flush=True)
         self.save_map()
+
+    def park_by_wall(self) -> None:
+        """Last centimetres: the distance to the wall at the car's right, measured square on with the ultrasonic.
+
+        The tags in the corner are 1.4 m away and good to 5-8 cm, and every strafe replaced the pose by such a fix, so
+        the car stopped anywhere from 9 to 24 cm off the wall on three laps. The ultrasonic square on a flat wall is
+        good to about 1 cm: strafe until the reading is what it is at home. (Along the lane the beam cannot look back
+        at the wall behind the car, so that direction stays on the pose.)
+        """
+        home = self.home
+        if self.servo is None or self.sensors is None or self.motor is None:
+            return
+        beam = home.yaw - math.pi / 2.0
+        ox = home.x + SONIC_PIVOT_M * math.cos(home.yaw) + SONIC_ARM_M * math.cos(beam)
+        oy = home.y + SONIC_PIVOT_M * math.sin(home.yaw) + SONIC_ARM_M * math.sin(beam)
+        expected = self.wall_distance(ox, oy, beam)
+        if abs(wrap_rad(home.yaw - self.pose.yaw)) > math.radians(6.0):
+            self.face(home.yaw, 2.0)
+        for _ in range(4):
+            try:
+                first = self.look(-90.0)
+                reads = [first] + [self.sensors.read_sonic() for _ in range(2)]
+            finally:
+                self.servo.set_pan(self.home_pan)
+                self.stop_event.wait(0.35)
+            reads = sorted(r for r in reads if r is not None)
+            if not reads:
+                print("    wall parking: no side echo; keeping the pose", flush=True)
+                return
+            err = reads[len(reads) // 2] / 100.0 - expected   # + : further from the wall than at home
+            print(f"    wall parking: {reads[len(reads) // 2]:.0f}cm to the wall at the right, "
+                  f"{expected * 100:.0f}cm at home ({err * 100:+.0f}cm)", flush=True)
+            if abs(err) <= 0.015:
+                break
+            if not self.strafe(-math.copysign(min(abs(err), 0.06), err)):
+                break
+            self.face(home.yaw, 2.0)
+        self.pose = Pose2D(self.pose.x, home.y, self.pose.yaw, self.pose.stamp, self.pose.fixes, self.pose.rms_px)
 
     def back_into_home(self) -> bool:
         """From the lane start to home in two dead-reckoned moves (strafe, then back up), never into a wall."""
