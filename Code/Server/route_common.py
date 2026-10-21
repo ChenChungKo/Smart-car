@@ -44,6 +44,7 @@ WIDE_PANS = (80.0, 60.0, 40.0, 20.0, 0.0, -20.0, -40.0, -60.0, -80.0, 0.0)  # on
 CAM_PANS = (-30.0, 30.0, 0.0)  # gimbal angles of one camera look (+ = left); ends facing ahead
 HOME_WALL_MARGIN_M = 0.03  # the parking spot keeps the whole body this far inside the walls
 BLIND_SLANT_GAP_M = 0.16   # nearer than this to the block, only the straight look is trusted for the strafe distance
+SIDE_CLEAR_MIN_M = 0.085  # side ultrasonic reading beside a block: less than this is under 2.5 cm between body and block
 PASS_MARGIN_M = 0.08   # the tail clears the block's far face by this much before strafing back (pose drifts a few cm)
 WALL_ECHO_M = 0.16     # what the camera sees this close to where the pose puts the wall ahead is the wall
 PATH_MARGIN_M = 0.025  # an obstacle within this of the body's width counts as in the path

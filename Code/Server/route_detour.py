@@ -199,6 +199,7 @@ class DetourMixin:
         near = detected + SONIC_AHEAD_M + gap
         pan = -90.0 * out
         far = None
+        nudges = 0
         probe = near + 0.10 + 0.04
         while far is None and probe <= near + self.block_long + 0.08:
             if not forward_to(probe - SONIC_PIVOT_M):
@@ -208,6 +209,17 @@ class DetourMixin:
             print(f"    {wall_side} side at +{(along() + SONIC_PIVOT_M - near) * 100:.0f}cm past its near face: "
                   f"ultrasonic {'-' if reading is None else f'{reading * 100:.0f}cm'}, wall {wall * 100:.0f}cm"
                   f"{' (still beside it)' if beside else ''}", flush=True)
+            if beside and reading < SIDE_CLEAR_MIN_M and nudges < 3:
+                # The camera set the strafe from the block's face; beside it the ultrasonic says how close the body
+                # really is (the block can stand a little crooked, or the pose be a few cm off): never pass closer
+                # than 2.5 cm, strafe out the difference and measure again from the same spot.
+                nudges += 1
+                step_out = min(SIDE_CLEAR_MIN_M - reading, 0.04)
+                print(f"    only {(reading - (self.body_half[1] - SONIC_ARM_M)) * 100:.0f}cm between the body and "
+                      f"the block; strafing {step_out * 100:.0f}cm further out", flush=True)
+                if not self.strafe(out * step_out, ahead_cap=False):
+                    raise Abort("detour: no room to give the obstacle more room")
+                continue
             if not beside:
                 far = along() + SONIC_PIVOT_M - 0.04
             probe += 0.05
