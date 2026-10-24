@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """All five cameras at once with ArUco detection on every frame: frames/s, detections/s and CPU load. Nothing moves.
 
-    python3 tools/camera_load_test.py [seconds]
+    python3 tools/camera_load_test.py [seconds [csi_w csi_h [usb_detect_hz [csi_detect_hz]]]]
 
 CSI front/rear at the size route_follow uses (1280x960, observe() with the full pose fit), the three USB cameras at
 640x480 (YUYV, detection only). Reports per camera: frames read per second, frames with at least one tag, and the
@@ -16,6 +16,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from aruco_localizer import ArucoLocalizer, CAR_PATH, MAP_PATH, load_json, open_grabbers
 
 seconds = float(sys.argv[1]) if len(sys.argv) > 1 else 15.0
+CSI_W = int(sys.argv[2]) if len(sys.argv) > 2 else 1280
+CSI_H = int(sys.argv[3]) if len(sys.argv) > 3 else 960
+USB_HZ = float(sys.argv[4]) if len(sys.argv) > 4 else 0.0   # 0 = every frame
+CSI_HZ = float(sys.argv[5]) if len(sys.argv) > 5 else 0.0   # 0 = every frame
 
 
 def cpu_times():
@@ -34,12 +38,16 @@ stop = threading.Event()
 def csi(name, grabber):
     frames = tagged = 0
     last = 0.0
+    last_run = 0.0
     while not stop.is_set():
         frame, stamp = grabber.latest()
         if frame is None or stamp == last:
             time.sleep(0.005)
             continue
         last = stamp
+        if CSI_HZ and time.monotonic() - last_run < 1.0 / CSI_HZ:
+            continue
+        last_run = time.monotonic()
         fixes, _c, _i = loc.observe(name, frame)
         frames += 1
         tagged += bool(fixes)
@@ -51,11 +59,15 @@ def usb(path):
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     frames = tagged = 0
+    last_det = 0.0
     while not stop.is_set():
         ok, frame = cap.read()
         if not ok:
             time.sleep(0.02)
             continue
+        if USB_HZ and time.monotonic() - last_det < 1.0 / USB_HZ:
+            continue
+        last_det = time.monotonic()
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         _corners, ids, _rej = detector.detectMarkers(gray)
         frames += 1
@@ -64,7 +76,7 @@ def usb(path):
     stats["usb:" + path.name.split("-usb-0:")[1][:4]] = (frames, tagged)
 
 
-grabbers = open_grabbers(car, 1280, 960, rear=True)
+grabbers = open_grabbers(car, CSI_W, CSI_H, rear=True)
 time.sleep(4.0)
 threads = [threading.Thread(target=csi, args=(n, g)) for n, g in grabbers.items()]
 paths = [p for p in sorted(Path("/dev/v4l/by-path").glob("*usb-0:*video-index0")) if "usbv2" not in p.name]
@@ -77,7 +89,7 @@ stop.set()
 [t.join() for t in threads]
 t1, i1 = cpu_times()
 elapsed = time.monotonic() - start
-print(f"{len(grabbers)} CSI + {len(paths)} USB cameras, {elapsed:.0f} s, ArUco detection on every frame")
+print(f"{len(grabbers)} CSI at {CSI_W}x{CSI_H} (detect {CSI_HZ or 'every frame'} Hz) + {len(paths)} USB 640x480 (detect {USB_HZ or 'every frame'} Hz), {elapsed:.0f} s")
 for name in sorted(stats):
     frames, tagged = stats[name]
     print(f"  {name:12s} {frames / elapsed:5.1f} frames/s   {tagged / max(frames, 1) * 100:3.0f} % of frames with a tag")
