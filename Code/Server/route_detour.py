@@ -142,11 +142,6 @@ class DetourMixin:
                         camera_blind = True
                         break
                 if need <= 0.012:
-                    # Whatever this look sees beside the path belongs to the block being gone around (only its near
-                    # face was in the first look, or the "at least this near" row of a look from 8 cm: those points
-                    # lie 10 cm from where its face really is, so they did not exclude it and the pass stopped on it).
-                    if len(obstacle):
-                        passing = np.vstack([passing, to_world(obstacle, self.pose)])
                     break
                 if off_lane() - start + need > self.args.detour_max_m:
                     raise Abort(f"detour: the path is blocked up to {(off_lane() - start + need) * 100:.0f}cm "
