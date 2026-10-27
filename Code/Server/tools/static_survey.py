@@ -70,6 +70,49 @@ def read_with_timeout(read, timeout: float = 1.5):
     return box[0] if box else None
 
 
+def pose_from_edges(heading: int, ahead, behind, left, right, width_cm: float, height_cm: float,
+                    length_cm: float, body_w_cm: float):
+    """Centre pose from distances measured from the BODY EDGES to the walls (cm; None = not measured).
+
+    ahead = nose to the wall in front, behind = tail to the wall behind, left/right = the car's side to the wall on
+    that side. Heading 0 faces the right wall (+x), 90 the top wall, 180 the left wall, -90 the bottom wall. Each axis
+    gets one estimate per wall that was measured; the spread between the two is the check of your tape, the body size
+    and the arena size. Returns (x, y, notes).
+    """
+    half_l, half_w = length_cm / 2.0, body_w_cm / 2.0
+    heading = int(round(heading)) % 360
+    xs, ys = [], []
+    if heading == 0:
+        if ahead is not None: xs.append(width_cm - ahead - half_l)
+        if behind is not None: xs.append(behind + half_l)
+        if left is not None: ys.append(height_cm - left - half_w)
+        if right is not None: ys.append(right + half_w)
+    elif heading == 90:
+        if ahead is not None: ys.append(height_cm - ahead - half_l)
+        if behind is not None: ys.append(behind + half_l)
+        if left is not None: xs.append(left + half_w)
+        if right is not None: xs.append(width_cm - right - half_w)
+    elif heading == 180:
+        if ahead is not None: xs.append(ahead + half_l)
+        if behind is not None: xs.append(width_cm - behind - half_l)
+        if left is not None: ys.append(left + half_w)
+        if right is not None: ys.append(height_cm - right - half_w)
+    elif heading == 270:
+        if ahead is not None: ys.append(ahead + half_l)
+        if behind is not None: ys.append(height_cm - behind - half_l)
+        if left is not None: xs.append(width_cm - left - half_w)
+        if right is not None: xs.append(right + half_w)
+    else:
+        raise ValueError("edge distances need heading 0, 90, 180 or -90")
+    if not xs or not ys:
+        raise ValueError("need at least one distance on each axis")
+    notes = []
+    for axis, values in (("x", xs), ("y", ys)):
+        if len(values) == 2:
+            notes.append(f"{axis}: the two walls give {values[0]:.1f} and {values[1]:.1f} cm (differ by {abs(values[0] - values[1]):.1f})")
+    return sum(xs) / len(xs), sum(ys) / len(ys), notes
+
+
 def set_pan(servo, value, tries: int = 8) -> None:
     """The servo driver sometimes answers 'Resource temporarily unavailable' on the I2C bus: try again."""
     for attempt in range(tries):
@@ -186,14 +229,26 @@ def main() -> None:
             if args.pose:
                 pose = tuple(args.pose)
             else:
-                text = input("\npose of the car centre: x_cm y_cm heading_deg  (q = finish) > ").strip()
+                text = input("\npose: 'e HEADING AHEAD BEHIND LEFT RIGHT' (cm from the body edges to the walls, - = not measured)"
+                             "\n      or 'X_CM Y_CM HEADING' (car centre)   (q = finish) > ").strip()
                 if text.lower() in ("q", "quit", ""):
                     break
                 try:
-                    pose = tuple(float(v) for v in text.replace(",", " ").split())
-                    assert len(pose) == 3
-                except (ValueError, AssertionError):
-                    print("  three numbers, e.g.  50 23 0")
+                    parts = text.replace(",", " ").split()
+                    if parts[0].lower() == "e":
+                        vals = [None if v == "-" else float(v) for v in parts[2:6]]
+                        w, h = (float(v) * 100.0 for v in arena["arena_size_m"])
+                        bl, bw = (float(v) * 100.0 for v in car.get("body_m", [0.29, 0.18]))
+                        cx, cy, notes = pose_from_edges(int(float(parts[1])), *vals, w, h, bl, bw)
+                        pose = (cx, cy, float(parts[1]))
+                        print(f"  centre of the car: x={cx:.1f} cm  y={cy:.1f} cm  heading {pose[2]:.0f}")
+                        for note in notes:
+                            print("  " + note)
+                    else:
+                        pose = tuple(float(v) for v in parts)
+                        assert len(pose) == 3
+                except (ValueError, AssertionError, IndexError) as exc:
+                    print(f"  not understood ({exc}); e.g.  e 0 40 95 62 58   or   70 70 0")
                     continue
             n += 1
             name = f"{n:02d}_x{pose[0]:.0f}_y{pose[1]:.0f}_h{pose[2]:.0f}"
