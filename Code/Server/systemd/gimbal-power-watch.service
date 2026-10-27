@@ -1,0 +1,18 @@
+# Point the gimbal straight ahead whenever the car's battery is switched on (the Pi stays up).
+# Install:
+#   sudo cp systemd/gimbal-power-watch.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now gimbal-power-watch.service
+[Unit]
+Description=Freenove 4WD: gimbal straight ahead when the car battery is switched on
+After=multi-user.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server
+ExecStart=/usr/bin/python3 /home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/gimbal_power_watch.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
