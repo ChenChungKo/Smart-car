@@ -58,7 +58,17 @@ class MotionError:
     fix_sigma_deg: float = 1.0
 
 
-def body_outline(x: float, y: float, yaw: float, half_l: float = 0.145, half_w: float = 0.09, n: int = 30):
+def _body_half() -> tuple[float, float]:
+    """Half length and half width of the car from car_nav.json body_m (the simulated body is the real one)."""
+    from aruco_localizer import CAR_PATH, load_json
+    length, width = load_json(CAR_PATH).get("body_m", [0.29, 0.18])
+    return float(length) / 2.0, float(width) / 2.0
+
+
+BODY_HALF_L, BODY_HALF_W = _body_half()
+
+
+def body_outline(x: float, y: float, yaw: float, half_l: float = BODY_HALF_L, half_w: float = BODY_HALF_W, n: int = 30):
     """Points around the body rectangle, for contact checks."""
     c, s = math.cos(yaw), math.sin(yaw)
     pts = []
