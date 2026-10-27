@@ -200,7 +200,8 @@ class DetourMixin:
         pan = -90.0 * out
         far = None
         nudges = 0
-        probe = near + 0.10 + 0.04
+        seen_beside = False   # the far face is where the beam stops finding it AFTER it found it
+        probe = near + 0.04   # look beside it from the first cm: the nose passes its near face before the beam does
         while far is None and probe <= near + self.block_long + 0.08:
             if not forward_to(probe - SONIC_PIVOT_M):
                 break
@@ -220,7 +221,8 @@ class DetourMixin:
                 if not self.strafe(out * step_out, ahead_cap=False) and reading < self.body_half[1] - SONIC_ARM_M:
                     raise Abort("detour: the body is touching the block and there is no room to move away")
                 continue
-            if not beside:
+            seen_beside = seen_beside or beside
+            if seen_beside and not beside:
                 far = along() + SONIC_PIVOT_M - 0.04
             probe += 0.05
         if far is None:

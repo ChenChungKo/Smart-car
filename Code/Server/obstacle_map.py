@@ -95,12 +95,7 @@ def shift_to_clear(points: np.ndarray, out: float, nose_x: float, half_width: fl
     hit = in_path(p, nose_x, half_width + margin)
     if not hit.any():
         return 0.0
-    u = out * p[hit, 1]
-    # The 80th percentile, not the largest: a few foot points land 5-8 cm off the block's edge (a shadow, a slanted
-    # view) and the largest of them made detours 10 cm too wide on the car (the real edge is the 80th percentile
-    # to within 1-2 cm on 12 saved looks). A strafe that is short is caught by the next look; a wide one is not.
-    edge = float(np.percentile(u, 80)) if len(u) >= 10 else float(u.max())
-    return edge + half_width + margin
+    return float((out * p[hit, 1]).max()) + half_width + margin
 
 
 def lane_coords(point, lane) -> tuple[float, float]:
