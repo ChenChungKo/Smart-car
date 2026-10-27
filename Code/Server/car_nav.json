@@ -16,35 +16,37 @@
   "camera_mounts": {
     "front": {
       "camera_num": 1,
-      "x_m": 0.112,
-      "y_m": 0.0,
-      "z_m": 0.037,
-      "yaw_deg": 0.0,
-      "pitch_deg": 14.4
+      "x_m": 0.1322,
+      "y_m": 0.0025,
+      "z_m": 0.0688,
+      "yaw_deg": -0.1568,
+      "pitch_deg": 15.2357,
+      "solved_2026_10_27": "tools/solve_mounts.py 12 個位置解出；原值 x 0.112 z 0.037 yaw 0 pitch 14.4"
     },
     "rear": {
       "camera_num": 0,
-      "x_m": -0.114,
-      "y_m": 0.0,
-      "z_m": 0.064,
-      "yaw_deg": 180.0,
-      "pitch_deg": 13.1
+      "x_m": -0.129,
+      "y_m": -0.0031,
+      "z_m": 0.0607,
+      "yaw_deg": 181.9697,
+      "pitch_deg": 14.717,
+      "solved_2026_10_27": "tools/solve_mounts.py 12 個位置解出；原值 x -0.114 z 0.064 yaw 180 pitch 13.1"
     },
     "left": {
-      "x_m": 0.0,
-      "y_m": 0.1,
-      "z_m": 0.04,
-      "yaw_deg": 90.0,
-      "pitch_deg": 15.0,
-      "note": "USB 左側，朝車左。位置是車身半寬的估計，尚未用標籤多點標定。"
+      "x_m": 0.0225,
+      "y_m": 0.0433,
+      "z_m": 0.1186,
+      "yaw_deg": 90.5257,
+      "pitch_deg": 16.8863,
+      "note": "USB 側邊相機。2026-10-27 用 12 個尺量位置的靜態資料解出（tools/solve_mounts.py）：位置靠近車中心（y 約 ±4 cm）、高約 11-12 cm，裝在雲台支架附近，不是車身兩側。"
     },
     "right": {
-      "x_m": 0.0,
-      "y_m": -0.1,
-      "z_m": 0.04,
-      "yaw_deg": -90.0,
-      "pitch_deg": 15.0,
-      "note": "USB 右側，朝車右。位置是車身半寬的估計，尚未用標籤多點標定。"
+      "x_m": 0.0296,
+      "y_m": -0.0424,
+      "z_m": 0.1122,
+      "yaw_deg": -91.9772,
+      "pitch_deg": 14.631,
+      "note": "USB 側邊相機。2026-10-27 用 12 個尺量位置的靜態資料解出（tools/solve_mounts.py）：位置靠近車中心（y 約 ±4 cm）、高約 11-12 cm，裝在雲台支架附近，不是車身兩側。"
     }
   },
   "max_off_axis_deg": 75.0,
