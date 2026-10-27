@@ -3,7 +3,7 @@
 #   sudo cp systemd/gimbal-power-watch.service /etc/systemd/system/
 #   sudo systemctl daemon-reload && sudo systemctl enable --now gimbal-power-watch.service
 [Unit]
-Description=Freenove 4WD: gimbal straight ahead when the car battery is switched on
+Description=Freenove 4WD: gimbal straight ahead when the car is switched on (S1, then S2)
 After=multi-user.target
 
 [Service]
