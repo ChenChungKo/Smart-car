@@ -31,8 +31,8 @@ from route_follow import Abort, RouteFollower
 
 IR_RANGE_M = 0.08
 # Where each IR sensor sits (car frame, m) and looks (deg, + = left), under route_follow's names.
+# The six modules of the car (ir_obstacle_pins.json): two at the nose corners, none in the middle, four at the wheels.
 IR_LAYOUT = {
-    "front": (0.145, 0.0, 0.0),
     "front_left": (0.145, 0.07, 0.0),
     "front_right": (0.145, -0.07, 0.0),
     "wheel_left_front": (0.08, 0.09, 90.0),

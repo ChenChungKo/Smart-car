@@ -125,6 +125,11 @@ class FlatWorld:
         for name, (lx, ly, look) in IR_LAYOUT.items():
             px, py = x + lx * c - ly * s, y + lx * s + ly * c
             out[name] = int(self.ray(px, py, yaw + math.radians(look), IR_RANGE_M, not self.dark_blocks) is not None)
+        # The logic names of the real car: front = front_left OR front_right, and so on (rear has no sensor).
+        out["front"] = int(out["front_left"] or out["front_right"])
+        out["left"] = int(out["front_left"] or out["wheel_left_front"] or out["wheel_left_rear"])
+        out["right"] = int(out["front_right"] or out["wheel_right_front"] or out["wheel_right_rear"])
+        out["rear"] = 0
         return out
 
     def hits(self, x: float, y: float, yaw: float) -> str | None:
