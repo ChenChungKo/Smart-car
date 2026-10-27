@@ -281,6 +281,13 @@ class ObstacleMap:
                      f"{abs(across) * 100:.0f} cm to the {'left' if across > 0 else 'right'} of the lane line")
         return text
 
+    @staticmethod
+    def near_outline(points: np.ndarray, block: dict, distance: float) -> np.ndarray:
+        """True for each world point inside the block's outline or within `distance` of it."""
+        poly = (np.asarray(block["outline"]) * 1000.0).astype(np.float32).reshape(-1, 1, 2)
+        return np.array([cv2.pointPolygonTest(poly, (float(x) * 1000.0, float(y) * 1000.0), True) >= -distance * 1000.0
+                         for x, y in points], bool)
+
     def drawn(self, min_hits: int = 3) -> list[dict]:
         """The blocks the map shows: seen near enough, enough times, and not just a wall's own foot line."""
         return [b for b in self.blocks if b.get("near_hits", 0) >= min_hits and "outline" in b

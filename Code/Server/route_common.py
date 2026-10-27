@@ -47,8 +47,13 @@ BLIND_SLANT_GAP_M = 0.16   # nearer than this to the block, only the straight lo
 SIDE_CLEAR_MIN_M = 0.085  # side ultrasonic reading beside a block: less than this is under 2.5 cm between body and block
 PASS_MARGIN_M = 0.08   # the tail clears the block's far face by this much before strafing back (pose drifts a few cm)
 WALL_ECHO_M = 0.16     # what the camera sees this close to where the pose puts the wall ahead is the wall
-PATH_MARGIN_M = 0.025  # an obstacle within this of the body's width counts as in the path
-CLEAR_MARGIN_M = 0.03  # a detour strafes until the path is clear by this much
+CLEAR_MARGIN_M = 0.03  # PLANNING margin: a detour strafes until the path is clear by this much
+BLOCK_OWN_M = 0.08  # a point this near the fitted outline of the block being passed is that block
+MEASURE_NOISE_M = 0.02  # how far apart two looks put the same block edge
+# STOP margin: only something this close to the body's width is in the way. Planning and stopping must not use the same
+# number: the plan puts the edge 3 cm off, and a look that reads it 0.5 cm closer would stop the car on the block it is
+# passing. The stop margin is the planning margin less the noise.
+PATH_MARGIN_M = CLEAR_MARGIN_M - MEASURE_NOISE_M
 EDGE_PAN_DEG = 25.0    # the ultrasonic also looks this far to each side for the edges of the path (15 missed a block 3 cm in)
 
 

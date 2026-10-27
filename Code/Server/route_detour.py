@@ -66,7 +66,7 @@ class DetourMixin:
                 self.record()
                 self.save_map()
 
-        passing = np.zeros((0, 2))  # world points of the block(s) this detour goes around
+        passing: set = set()  # ids (in the obstacle map) of the block(s) this detour goes around
 
         def forward_to(goal: float) -> bool:
             """Drive along the lane to `goal`; False when a sensor or wall stopped it short."""
@@ -78,7 +78,7 @@ class DetourMixin:
                 if self.scanner is not None:
                     # Out beside the obstacle the car is no longer on its lane: look before each step, another
                     # block (e.g. one standing out from the next wall) may be in the way of the shifted path.
-                    ahead_gap = self.camera_gap(exclude=passing)
+                    ahead_gap = self.camera_gap(exclude_blocks=tuple(passing))
                     if ahead_gap is not None:
                         step = min(step, ahead_gap - 0.12, CAM_STEP_M)
                         if step < 0.02:
@@ -115,7 +115,7 @@ class DetourMixin:
                     for block in self.obstacles.blocks:
                         if block.get("last_scan") == self.obstacles.scans:
                             print(f"    {self.obstacles.describe(block, target)}", flush=True)
-                            passing = np.vstack([passing, block["points"]])
+                            passing.add(block["id"])
                 judged = obstacle
                 if gap < BLIND_SLANT_GAP_M:
                     # Right up against the block the camera is blind to its foot: the slanted looks (pan +-30) only

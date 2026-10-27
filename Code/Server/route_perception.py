@@ -140,7 +140,7 @@ class PerceptionMixin:
             tiles.append(tile)
         cv2.imwrite(str(self.debug_dir / "last_look.jpg"), np.hstack(tiles))
 
-    def camera_gap(self, reason: str | None = None, exclude: np.ndarray | None = None) -> float | None:
+    def camera_gap(self, reason: str | None = None, exclude_blocks: tuple = ()) -> float | None:
         """Gap (m, from the ultrasonic face) to the nearest thing in the car's path that is not the wall.
 
         The camera looks at the path ahead (obstacle_map.path_gap: the body's width plus PATH_MARGIN_M,
@@ -151,11 +151,15 @@ class PerceptionMixin:
             return None
         nose, half = self.body_half[0], self.body_half[1] + PATH_MARGIN_M
         obstacle, _wall = self.look_around()
-        if exclude is not None and len(exclude) and len(obstacle):
-            # the block being gone around is still beside-ahead of the car, only a few cm clear of its path
+        if exclude_blocks and len(obstacle):
+            # The block being gone around is a map object: what the camera sees within BLOCK_OWN_M of its fitted
+            # outline is that block, wherever the foot points of this look put its edge.
             world = to_world(obstacle, self.pose)
-            near = np.hypot(world[:, None, 0] - exclude[None, :, 0], world[:, None, 1] - exclude[None, :, 1]).min(axis=1)
-            obstacle = obstacle[near > 0.10]
+            own = np.zeros(len(world), bool)
+            for block in self.obstacles.blocks:
+                if block["id"] in exclude_blocks and "outline" in block:
+                    own |= self.obstacles.near_outline(world, block, BLOCK_OWN_M)
+            obstacle = obstacle[~own]
         ahead = path_gap(obstacle, nose, half)
         gap = None if ahead is None else ahead + (nose - SONIC_AHEAD_M)
         readings = [r for r in (self.sensors.read_sonic() for _ in range(3)) if r is not None]
