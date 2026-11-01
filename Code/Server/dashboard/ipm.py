@@ -10,7 +10,7 @@ import numpy as np
 
 X_RANGE = (-0.45, 0.90)    # m ahead of the car centre: bottom to top of the picture
 Y_RANGE = (-0.70, 0.70)    # m to the left: right edge to left edge
-RES_M = 0.01
+RES_M = 0.004              # 4 mm per picture pixel: finer than the cameras see the floor, so nothing is blown up blurry
 
 
 class GroundMapper:
@@ -67,9 +67,9 @@ class GroundMapper:
             return int(round((Y_RANGE[1] - y) / RES_M)), int(round((X_RANGE[1] - x) / RES_M))
         poly = np.array([cell(length / 2, width / 2), cell(length / 2, -width / 2), cell(-length / 2, -width / 2),
                          cell(-length / 2, width / 2)], np.int32)
-        cv2.polylines(out, [poly], True, (80, 80, 255), 2, cv2.LINE_AA)
-        cv2.arrowedLine(out, cell(0, 0), cell(length / 2 + 0.08, 0), (80, 80, 255), 2, tipLength=0.3)
+        cv2.polylines(out, [poly], True, (80, 80, 255), 3, cv2.LINE_AA)
+        cv2.arrowedLine(out, cell(0, 0), cell(length / 2 + 0.08, 0), (80, 80, 255), 3, tipLength=0.3)
         for r in (0.25, 0.5, 0.75):                              # distance rings every 25 cm ahead
             cv2.line(out, cell(r, Y_RANGE[1]), cell(r, Y_RANGE[0]), (110, 110, 110), 1)
-            cv2.putText(out, f"{int(r * 100)}", (4, cell(r, 0)[1] - 3), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
+            cv2.putText(out, f"{int(r * 100)}", (4, cell(r, 0)[1] - 3), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
         return out

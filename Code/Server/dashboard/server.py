@@ -134,6 +134,7 @@ main.wide{grid-template-columns:1fr}main.wide .camcard{grid-row:1}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}
 .card h2{font-size:13px;margin:0 0 8px;color:var(--mute);font-weight:600;letter-spacing:.02em}
 img.stream{width:100%;border-radius:6px;background:#0b0d11;display:block;min-height:60px}
+img#main{max-height:68vh;object-fit:contain}
 .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}.tabs button{border:1px solid var(--line);background:var(--bg);color:var(--ink);padding:5px 12px;border-radius:7px;cursor:pointer;font:inherit}
 .tabs button.on{background:var(--acc);border-color:var(--acc);color:#fff}
 .tabs .sp{flex:1}.tabs button.off{color:var(--mute)}
