@@ -32,7 +32,7 @@ class Hub:
             out["frame_age_s"] = {n: round(time.time() - t, 2) for n, (_f, t) in self.frames.items()}
         return out
 
-    def set_frame(self, name: str, bgr: np.ndarray, width: int = 640) -> None:
+    def set_frame(self, name: str, bgr: np.ndarray, width: int = 960) -> None:
         h, w = bgr.shape[:2]
         small = cv2.resize(bgr, (width, int(h * width / w)), interpolation=cv2.INTER_AREA) if w > width else bgr.copy()
         with self.lock:

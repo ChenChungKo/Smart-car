@@ -128,14 +128,15 @@ PAGE = r"""<!doctype html>
 header{display:flex;gap:16px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--card);flex-wrap:wrap}
 header h1{font-size:16px;margin:0 8px 0 0}.pill{padding:2px 10px;border-radius:99px;border:1px solid var(--line);font-size:13px}
 .ok{color:var(--ok)}.bad{color:var(--bad)}.mute{color:var(--mute)}
-main{display:grid;grid-template-columns:minmax(320px,640px) minmax(320px,1fr);gap:14px;padding:14px;max-width:1500px;margin:auto}
+main{display:grid;grid-template-columns:minmax(300px,520px) minmax(360px,1fr);gap:14px;padding:14px;max-width:1900px;margin:auto}
+main.wide{grid-template-columns:1fr}main.wide .camcard{grid-row:1}
 @media (max-width:900px){main{grid-template-columns:1fr}}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}
 .card h2{font-size:13px;margin:0 0 8px;color:var(--mute);font-weight:600;letter-spacing:.02em}
 img.stream{width:100%;border-radius:6px;background:#0b0d11;display:block;min-height:60px}
 .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}.tabs button{border:1px solid var(--line);background:var(--bg);color:var(--ink);padding:5px 12px;border-radius:7px;cursor:pointer;font:inherit}
 .tabs button.on{background:var(--acc);border-color:var(--acc);color:#fff}
-.thumbs{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-top:8px}.thumbs div{font-size:11px;color:var(--mute);text-align:center}
+.tabs .sp{flex:1}.tabs button.off{color:var(--mute)}
 .opts{display:flex;gap:12px;flex-wrap:wrap;margin:6px 0;font-size:13px}.opts label{display:flex;gap:4px;align-items:center;cursor:pointer}
 table{border-collapse:collapse;width:100%}td{padding:2px 6px;border-bottom:1px solid var(--line)}td:first-child{color:var(--mute);width:42%}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media (max-width:700px){.grid2{grid-template-columns:1fr}}
@@ -158,14 +159,13 @@ svg text{fill:var(--mute);font-size:10px}pre{margin:0;max-height:150px;overflow:
  </div>
 </section>
 <section>
- <div class="card"><h2>視角</h2>
+ <div class="card camcard"><h2>視角（一次只開一個畫面，其他不傳輸）</h2>
   <div class="tabs" id="tabs"></div>
   <img class="stream" id="main" alt="camera">
   <div class="opts" id="bevopts" style="display:none"><span class="mute">鳥瞰圖使用的相機：</span>
    <label><input type="checkbox" value="front" checked>前</label><label><input type="checkbox" value="rear" checked>後</label>
    <label><input type="checkbox" value="left" checked>左</label><label><input type="checkbox" value="right" checked>右</label>
    <label><input type="checkbox" value="gimbal">雲台</label></div>
-  <div class="thumbs" id="thumbs"></div>
  </div>
  <div class="grid2" style="margin-top:14px">
   <div class="card"><h2>感測器</h2>
@@ -190,13 +190,15 @@ function setMap(){$('map').src='/stream/map?layers='+layers()+'&t='+Date.now()}
 function bevCams(){return [...document.querySelectorAll('#bevopts input:checked')].map(i=>i.value).join(',')}
 function setMain(){
   $('bevopts').style.display=view==='bev'?'flex':'none';
-  $('main').src=view==='bev'?'/stream/bev?cams='+bevCams()+'&t='+Date.now():'/stream/'+view+'?t='+Date.now();
-  document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.v===view));
+  $('main').style.display=view==='off'?'none':'block';
+  if(view==='off')$('main').removeAttribute('src');
+  else $('main').src=view==='bev'?'/stream/bev?cams='+bevCams()+'&t='+Date.now():'/stream/'+view+'?t='+Date.now();
+  document.querySelectorAll('#tabs button[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===view));
 }
-CAMS.filter(c=>c[0]!=='map').forEach(([v,t])=>{const b=document.createElement('button');b.textContent=t;b.dataset.v=v;b.onclick=()=>{view=v;setMain()};$('tabs').appendChild(b)});
+CAMS.filter(c=>c[0]!=='map').concat([["off","關閉"]]).forEach(([v,t])=>{const b=document.createElement('button');b.textContent=t;b.dataset.v=v;if(v==='off')b.className='off';b.onclick=()=>{view=v;setMain()};$('tabs').appendChild(b)});
+{const sp=document.createElement('span');sp.className='sp';$('tabs').appendChild(sp);const z=document.createElement('button');z.textContent='放大';z.onclick=()=>{const w=document.querySelector('main').classList.toggle('wide');z.textContent=w?'縮小':'放大'};$('tabs').appendChild(z)}
 document.querySelectorAll('#layers input').forEach(i=>i.onchange=setMap);
 document.querySelectorAll('#bevopts input').forEach(i=>i.onchange=setMain);
-['front','rear','left','right','gimbal'].forEach(n=>{const d=document.createElement('div');d.innerHTML='<img class="stream" src="/stream/'+n+'?t='+Date.now()+'" style="cursor:pointer"><div>'+({front:'前',rear:'後',left:'左',right:'右',gimbal:'雲台'})[n]+'</div>';d.firstChild.onclick=()=>{view=n;setMain()};$('thumbs').appendChild(d)});
 Object.entries(IR).forEach(([k,[x,y]])=>{const g=document.createElementNS('http://www.w3.org/2000/svg','g');g.innerHTML='<circle id="ir_'+k+'" cx="'+x+'" cy="'+y+'" r="7" fill="#999"/><text x="'+(x<100?x-34:x+10)+'" y="'+(y+3)+'">'+IRN[k]+'</text>';$('irdots').appendChild(g)});
 setMap();setMain();
 async function tick(){
