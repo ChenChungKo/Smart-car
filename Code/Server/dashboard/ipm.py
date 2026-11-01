@@ -12,7 +12,7 @@ SHOW_SCALE = 3
 FEATHER_PX = 12            # a camera counts fully only this many cells (2.4 cm) inside the edge of what it sees
 SHARP_POWER = 6            # blend weight: (sharpness / best sharpness) to this power
 MIN_OVERLAP_CELLS = 300
-MARGIN_M = 0.10            # the picture reaches this far beyond the body edge on every side
+MARGIN_M = 0.20            # the picture reaches this far beyond the body edge on every side
 MIN_DEPRESSION_DEG = 12.0  # a camera shows the floor only where it looks down at it by this much: lower, one pixel covers many cm
 RES_M = 0.002              # 3 mm per picture pixel: finer than the cameras see the floor
 
@@ -115,7 +115,7 @@ class GroundMapper:
                     int(round((self.x_range[1] - x) / RES_M * SHOW_SCALE)))
         cv2.rectangle(out, cell(length / 2, width / 2), cell(-length / 2, -width / 2), (80, 80, 255), 3, cv2.LINE_AA)
         cv2.arrowedLine(out, cell(0, 0), cell(length / 2 - 0.02, 0), (80, 80, 255), 3, tipLength=0.25)
-        for d in (0.05, 0.10):                                   # 5 and 10 cm from the body edge
+        for d in (0.10, 0.20):                                   # 10 and 20 cm from the body edge
             cv2.rectangle(out, cell(length / 2 + d, width / 2 + d), cell(-length / 2 - d, -width / 2 - d),
                           (150, 150, 150), 1, cv2.LINE_AA)
         return out
