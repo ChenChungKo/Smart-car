@@ -8,9 +8,10 @@ import math
 import cv2
 import numpy as np
 
-X_RANGE = (-0.45, 0.90)    # m ahead of the car centre: bottom to top of the picture
-Y_RANGE = (-0.70, 0.70)    # m to the left: right edge to left edge
-RES_M = 0.004              # 4 mm per picture pixel: finer than the cameras see the floor, so nothing is blown up blurry
+X_RANGE = (-0.55, 0.55)    # m ahead of the car centre: bottom to top of the picture
+Y_RANGE = (-0.55, 0.55)    # m to the left: right edge to left edge
+MIN_DEPRESSION_DEG = 12.0  # a camera shows the floor only where it looks down at it by this much: lower, one pixel covers many cm
+RES_M = 0.003              # 3 mm per picture pixel: finer than the cameras see the floor
 
 
 class GroundMapper:
@@ -36,10 +37,12 @@ class GroundMapper:
             p, _ = cv2.fisheye.projectPoints(pts[ok].reshape(-1, 1, 3).astype(np.float64), np.zeros(3), np.zeros(3), k, d)
             proj[ok] = p.reshape(-1, 2)
         ok &= (proj[:, 0] >= 0) & (proj[:, 0] < w - 1) & (proj[:, 1] >= 0) & (proj[:, 1] < h - 1)
-        # nearer to the camera = sharper: weight by distance from the camera's foot on the floor
+        # the floor is sharp where the camera is high and close: cm of floor per pixel grows like range^2 / height
         cam_xy = self.car_from_camera(mount)[:2, 3]
+        height = float(self.car_from_camera(mount)[2, 3])
         dist = np.hypot(self.ground[:, 0] - cam_xy[0], self.ground[:, 1] - cam_xy[1])
-        weight = np.where(ok, 1.0 / (0.05 + dist), 0.0).reshape(self.shape).astype(np.float32)
+        ok &= np.degrees(np.arctan2(height, dist)) >= MIN_DEPRESSION_DEG
+        weight = np.where(ok, height / (dist ** 2 + height ** 2), 0.0).reshape(self.shape).astype(np.float32)
         mx = proj[:, 0].reshape(self.shape).astype(np.float32)
         my = proj[:, 1].reshape(self.shape).astype(np.float32)
         return mx, my, weight
@@ -69,7 +72,7 @@ class GroundMapper:
                          cell(-length / 2, width / 2)], np.int32)
         cv2.polylines(out, [poly], True, (80, 80, 255), 3, cv2.LINE_AA)
         cv2.arrowedLine(out, cell(0, 0), cell(length / 2 + 0.08, 0), (80, 80, 255), 3, tipLength=0.3)
-        for r in (0.25, 0.5, 0.75):                              # distance rings every 25 cm ahead
+        for r in (0.25, 0.5):                              # distance rings every 25 cm ahead
             cv2.line(out, cell(r, Y_RANGE[1]), cell(r, Y_RANGE[0]), (110, 110, 110), 1)
             cv2.putText(out, f"{int(r * 100)}", (4, cell(r, 0)[1] - 3), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
         return out
