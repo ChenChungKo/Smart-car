@@ -80,22 +80,19 @@ def create_app(hub: Hub, arena: dict, car: dict) -> Flask:
             return img, box["t"], "map" + ",".join(sorted(layers))
         return mjpeg(make)
 
-    @app.route("/stream/bev")
-    def stream_bev():
+    @app.route("/snapshot/bev")
+    def snapshot_bev():
+        """One bird's-eye picture from the latest frames, made when asked (no stream)."""
         use = [c for c in (request.args.get("cams") or "front,rear,left,right").split(",") if c in CAMERAS]
-
-        def make():
-            time.sleep(0.2)
-            items, stamp = [], 0.0
-            for name in use:
-                got = hub.frame(name)
-                if got is not None and time.time() - got[1] < 3.0:
-                    items.append((name, mounts[name], got[0]))
-                    stamp = max(stamp, got[1])
-            if not items:
-                return None
-            return mapper.mosaic(items), stamp, "bev" + ",".join(use)
-        return mjpeg(make)
+        items = []
+        for name in use:
+            got = hub.frame(name)
+            if got is not None and time.time() - got[1] < 3.0:
+                items.append((name, mounts[name], got[0]))
+        if not items:
+            return "no camera picture", 503
+        ok, buf = cv2.imencode(".jpg", mapper.mosaic(items), [cv2.IMWRITE_JPEG_QUALITY, 90])
+        return Response(buf.tobytes(), mimetype="image/jpeg", headers={"Cache-Control": "no-store"})
 
     @app.route("/stream/<name>")
     def stream_camera(name: str):
@@ -162,10 +159,10 @@ svg text{fill:var(--mute);font-size:10px}pre{margin:0;max-height:150px;overflow:
  <div class="card camcard"><h2>視角（一次只開一個畫面，其他不傳輸）</h2>
   <div class="tabs" id="tabs"></div>
   <img class="stream" id="main" alt="camera">
-  <div class="opts" id="bevopts" style="display:none"><span class="mute">鳥瞰圖使用的相機：</span>
+  <div class="opts" id="bevopts" style="display:none"><span class="mute">鳥瞰圖（按下當下拍一張，不會更新）使用的相機：</span>
    <label><input type="checkbox" value="front" checked>前</label><label><input type="checkbox" value="rear" checked>後</label>
    <label><input type="checkbox" value="left" checked>左</label><label><input type="checkbox" value="right" checked>右</label>
-   <label><input type="checkbox" value="gimbal">雲台</label></div>
+   <label><input type="checkbox" value="gimbal">雲台</label><button onclick="setMain()">重新拍一張</button></div>
  </div>
  <div class="grid2" style="margin-top:14px">
   <div class="card"><h2>感測器</h2>
@@ -192,7 +189,7 @@ function setMain(){
   $('bevopts').style.display=view==='bev'?'flex':'none';
   $('main').style.display=view==='off'?'none':'block';
   if(view==='off')$('main').removeAttribute('src');
-  else $('main').src=view==='bev'?'/stream/bev?cams='+bevCams()+'&t='+Date.now():'/stream/'+view+'?t='+Date.now();
+  else $('main').src=view==='bev'?'/snapshot/bev?cams='+bevCams()+'&t='+Date.now():'/stream/'+view+'?t='+Date.now();
   document.querySelectorAll('#tabs button[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===view));
 }
 CAMS.filter(c=>c[0]!=='map').concat([["off","關閉"]]).forEach(([v,t])=>{const b=document.createElement('button');b.textContent=t;b.dataset.v=v;if(v==='off')b.className='off';b.onclick=()=>{view=v;setMain()};$('tabs').appendChild(b)});
