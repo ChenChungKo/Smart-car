@@ -8,19 +8,22 @@ import math
 import cv2
 import numpy as np
 
-X_RANGE = (-0.55, 0.55)    # m ahead of the car centre: bottom to top of the picture
-Y_RANGE = (-0.55, 0.55)    # m to the left: right edge to left edge
+SHOW_SCALE = 3
+MARGIN_M = 0.10            # the picture reaches this far beyond the body edge on every side
 MIN_DEPRESSION_DEG = 12.0  # a camera shows the floor only where it looks down at it by this much: lower, one pixel covers many cm
-RES_M = 0.003              # 3 mm per picture pixel: finer than the cameras see the floor
+RES_M = 0.002              # 3 mm per picture pixel: finer than the cameras see the floor
 
 
 class GroundMapper:
-    def __init__(self, loc, car_from_camera):
+    def __init__(self, loc, car_from_camera, body: tuple[float, float]):
         self.loc = loc
         self.car_from_camera = car_from_camera
+        self.body = body
+        self.x_range = (-body[0] / 2 - MARGIN_M, body[0] / 2 + MARGIN_M)   # m ahead of the car centre: bottom to top
+        self.y_range = (-body[1] / 2 - MARGIN_M, body[1] / 2 + MARGIN_M)   # m to the left: right edge to left edge
         self.maps: dict = {}
-        xs = np.arange(X_RANGE[1], X_RANGE[0], -RES_M)          # top row = furthest ahead
-        ys = np.arange(Y_RANGE[1], Y_RANGE[0], -RES_M)          # left column = most left
+        xs = np.arange(self.x_range[1], self.x_range[0], -RES_M)          # top row = furthest ahead
+        ys = np.arange(self.y_range[1], self.y_range[0], -RES_M)          # left column = most left
         gy, gx = np.meshgrid(ys, xs)                            # (rows, cols)
         self.shape = gx.shape
         self.ground = np.stack([gx, gy, np.zeros_like(gx)], axis=-1).reshape(-1, 3)
@@ -55,8 +58,8 @@ class GroundMapper:
         mx, my, weight = self.maps[key]
         return cv2.remap(frame, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT), weight
 
-    def mosaic(self, items: list, body: tuple[float, float]) -> np.ndarray:
-        """items: [(camera, mount, frame)]; the sharpest camera wins each floor cell; the car is drawn on top."""
+    def mosaic(self, items: list) -> np.ndarray:
+        """items: [(camera, mount, frame)]; the sharpest camera wins each floor cell; the body outline is drawn on top."""
         out = np.full(self.shape + (3,), 40, np.uint8)
         best = np.zeros(self.shape, np.float32)
         for camera, mount, frame in items:
@@ -64,15 +67,18 @@ class GroundMapper:
             take = weight > best
             out[take] = img[take]
             best = np.maximum(best, weight)
-        # car outline: x forward = up, y left = left
-        length, width = body
+        out = cv2.resize(out, None, fx=SHOW_SCALE, fy=SHOW_SCALE, interpolation=cv2.INTER_CUBIC)   # smooth, lines stay sharp
+        unseen = cv2.resize((best == 0).astype(np.uint8), (out.shape[1], out.shape[0]), interpolation=cv2.INTER_NEAREST) > 0
+        yy, xx = np.indices(unseen.shape)
+        out[unseen & (((xx + yy) // 6) % 2 == 0)] = (70, 70, 70)    # striped: no camera sees this floor
+        length, width = self.body                                # x forward = up, y left = left
+
         def cell(x, y):
-            return int(round((Y_RANGE[1] - y) / RES_M)), int(round((X_RANGE[1] - x) / RES_M))
-        poly = np.array([cell(length / 2, width / 2), cell(length / 2, -width / 2), cell(-length / 2, -width / 2),
-                         cell(-length / 2, width / 2)], np.int32)
-        cv2.polylines(out, [poly], True, (80, 80, 255), 3, cv2.LINE_AA)
-        cv2.arrowedLine(out, cell(0, 0), cell(length / 2 + 0.08, 0), (80, 80, 255), 3, tipLength=0.3)
-        for r in (0.25, 0.5):                              # distance rings every 25 cm ahead
-            cv2.line(out, cell(r, Y_RANGE[1]), cell(r, Y_RANGE[0]), (110, 110, 110), 1)
-            cv2.putText(out, f"{int(r * 100)}", (4, cell(r, 0)[1] - 3), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
+            return (int(round((self.y_range[1] - y) / RES_M * SHOW_SCALE)),
+                    int(round((self.x_range[1] - x) / RES_M * SHOW_SCALE)))
+        cv2.rectangle(out, cell(length / 2, width / 2), cell(-length / 2, -width / 2), (80, 80, 255), 3, cv2.LINE_AA)
+        cv2.arrowedLine(out, cell(0, 0), cell(length / 2 - 0.02, 0), (80, 80, 255), 3, tipLength=0.25)
+        for d in (0.05, 0.10):                                   # 5 and 10 cm from the body edge
+            cv2.rectangle(out, cell(length / 2 + d, width / 2 + d), cell(-length / 2 - d, -width / 2 - d),
+                          (150, 150, 150), 1, cv2.LINE_AA)
         return out

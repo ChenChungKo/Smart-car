@@ -40,7 +40,7 @@ def create_app(hub: Hub, arena: dict, car: dict) -> Flask:
     app = Flask(__name__)
     loc = ArucoLocalizer(arena, car)
     mounts = all_mounts(car)
-    mapper = GroundMapper(loc, car_from_camera)
+    mapper = GroundMapper(loc, car_from_camera, tuple(float(v) for v in car.get("body_m", [0.275, 0.17])))
 
     def mjpeg(make):
         def gen():
@@ -83,7 +83,6 @@ def create_app(hub: Hub, arena: dict, car: dict) -> Flask:
     @app.route("/stream/bev")
     def stream_bev():
         use = [c for c in (request.args.get("cams") or "front,rear,left,right").split(",") if c in CAMERAS]
-        body = tuple(float(v) for v in car.get("body_m", [0.275, 0.17]))
 
         def make():
             time.sleep(0.2)
@@ -95,7 +94,7 @@ def create_app(hub: Hub, arena: dict, car: dict) -> Flask:
                     stamp = max(stamp, got[1])
             if not items:
                 return None
-            return mapper.mosaic(items, body), stamp, "bev" + ",".join(use)
+            return mapper.mosaic(items), stamp, "bev" + ",".join(use)
         return mjpeg(make)
 
     @app.route("/stream/<name>")
