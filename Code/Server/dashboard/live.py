@@ -17,6 +17,8 @@ from dashboard.hub import Hub
 SERVER = Path(__file__).resolve().parents[1]
 GIMBAL_MOUNT = {"x_m": 0.1381, "y_m": 0.0158, "z_m": 0.1146, "yaw_deg": 1.514, "pitch_deg": 3.9464}  # solved 2026-10-27
 IR_NAMES = ("front_left", "front_right", "wheel_left_front", "wheel_left_rear", "wheel_right_front", "wheel_right_rear")
+FRAME_PERIOD_S = 0.1     # pictures for the page: 10 per second per camera
+DETECT_PERIOD_S = 0.4   # tag search per camera (about 2.5 per second; the pose is fused from the last 1.2 s anyway)
 
 
 def usb_path(bus: str) -> Path:
@@ -68,12 +70,13 @@ class LiveSource:
 
     def start(self) -> None:
         if self.want_cameras:
-            self.grabbers = open_grabbers(self.car, 1280, 960, rear=True)
+            self.grabbers = open_grabbers(self.car, 1280, 960, rear=True, max_fps=1.0 / FRAME_PERIOD_S)
             for name in ("gimbal", "left", "right"):
                 path = usb_path(self.hardware[name]["usb_bus"])
                 cap = cv2.VideoCapture(str(path), cv2.CAP_V4L2)
                 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
                 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                cap.set(cv2.CAP_PROP_FPS, 1.0 / FRAME_PERIOD_S)
                 if cap.isOpened():
                     self.caps[name] = cap
                     self._thread(self._read_usb, name, cap)
@@ -90,12 +93,16 @@ class LiveSource:
         self.threads.append(t)
 
     def _read_usb(self, name: str, cap) -> None:
+        taken = 0.0
         while not self.stop.is_set():
-            ok, frame = cap.read()
-            if ok:
-                self.latest[name] = (frame, time.time())
-            else:
+            if not cap.grab():                       # grab keeps the camera buffer empty; the conversion is in retrieve
                 time.sleep(0.05)
+                continue
+            if time.time() - taken >= FRAME_PERIOD_S:
+                ok, frame = cap.retrieve()
+                if ok:
+                    taken = time.time()
+                    self.latest[name] = (frame, taken)
 
     def _frame(self, name: str):
         if name in self.grabbers:
@@ -104,26 +111,35 @@ class LiveSource:
         return self.latest.get(name)
 
     def _detect_loop(self) -> None:
+        """A picture goes to the page every FRAME_PERIOD_S per camera; the tags are searched at most every DETECT_PERIOD_S
+        and the last result is drawn on the pictures in between."""
         names = ["front", "rear", "left", "right", "gimbal"]
         last_stamp: dict[str, float] = {}
+        last_detect: dict[str, float] = {}
+        result: dict[str, tuple] = {}
         while not self.stop.is_set():
             for name in names:
                 got = self._frame(name)
                 if got is None or got[1] == last_stamp.get(name):
                     continue
                 frame, stamp = got
-                last_stamp[name] = stamp
-                try:
-                    fixes, corners, ids = self.loc.observe(name, frame)
-                except Exception as exc:  # noqa: BLE001 - one bad frame must not stop the dashboard
-                    self.hub.add_log(f"{name}: {exc}")
+                if stamp - last_stamp.get(name, 0.0) < FRAME_PERIOD_S:
                     continue
-                self.fixes.append((time.time(), name, fixes))
-                self.tags_seen[name] = [] if ids is None else sorted(int(i) for i in ids.flatten())
-                view = draw_overlay(frame, corners, ids, fixes, name)
-                self.hub.set_frame(name, view)
-                time.sleep(0.02)
-            time.sleep(0.05)
+                last_stamp[name] = stamp
+                if name not in result or time.time() - last_detect[name] >= DETECT_PERIOD_S:
+                    try:
+                        result[name] = self.loc.observe(name, frame)
+                    except Exception as exc:  # noqa: BLE001 - one bad frame must not stop the dashboard
+                        self.hub.add_log(f"{name}: {exc}")
+                        continue
+                    last_detect[name] = time.time()
+                    fixes, _corners, ids = result[name]
+                    self.fixes.append((time.time(), name, fixes))
+                    self.tags_seen[name] = [] if ids is None else sorted(int(i) for i in ids.flatten())
+                fixes, corners, ids = result[name]
+                self.hub.set_frame(name, draw_overlay(frame, corners, ids, fixes, name))
+                time.sleep(0.01)
+            time.sleep(0.03)
 
     def _pose_loop(self) -> None:
         cpu_state: list = []

@@ -423,8 +423,9 @@ class ArucoLocalizer:
 class CsiGrabber:
     """Keep the latest frame from one Picamera2 CSI camera on a worker thread."""
 
-    def __init__(self, name: str, camera_num: int, width: int, height: int):
+    def __init__(self, name: str, camera_num: int, width: int, height: int, max_fps: float | None = None):
         self.name = name
+        self.max_fps = max_fps          # None: the camera's own rate (a viewer needs fewer pictures and the CPU less work)
         self.camera_num = camera_num
         self.width = width
         self.height = height
@@ -451,6 +452,8 @@ class CsiGrabber:
                 camera.configure(create_csi_still_configuration(camera, self.width, self.height))
                 camera.start()
                 camera.set_controls({"AeEnable": True, "AwbEnable": True})
+                if self.max_fps:
+                    camera.set_controls({"FrameDurationLimits": (int(1e6 / self.max_fps),) * 2})
                 time.sleep(0.8)
                 print(f"{self.name}: CSI camera_num={self.camera_num} {self.width}x{self.height}", flush=True)
                 while not self._stop.is_set():
@@ -479,12 +482,12 @@ class CsiGrabber:
         self._thread.join(timeout=3.0)
 
 
-def open_grabbers(car: dict, width: int, height: int, rear: bool = True) -> dict[str, CsiGrabber]:
+def open_grabbers(car: dict, width: int, height: int, rear: bool = True, max_fps: float | None = None) -> dict[str, CsiGrabber]:
     names = ["front", "rear"] if rear else ["front"]
     grabbers = {}
     for name in names:
         mount = car["camera_mounts"][name]
-        grabbers[name] = CsiGrabber(name, int(mount["camera_num"]), width, height).start()
+        grabbers[name] = CsiGrabber(name, int(mount["camera_num"]), width, height, max_fps).start()
     return grabbers
 
 
