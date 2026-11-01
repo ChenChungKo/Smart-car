@@ -210,6 +210,9 @@ def main():
         print("NOTE: car_nav.json motion is not calibrated; run --calibrate-motion --arm first.", flush=True)
     try:
         follower.start()
+        if args.dashboard:
+            from dashboard.embed import attach
+            attach(follower, args.dashboard)
         if args.calibrate_motion:
             follower.calibrate_motion()
         else:

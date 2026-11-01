@@ -55,6 +55,9 @@ def parse_args(argv: list[str] | None = None):
     p.add_argument("--no-sonic", action="store_true")
     p.set_defaults(active_high=False)
     p.add_argument("--ir-active-high", action="store_true", dest="active_high")
+    p.add_argument("--dashboard", nargs="?", const=5000, type=int, default=None, metavar="PORT",
+                   help="Serve the web dashboard (cameras, map, bird's-eye view, sensors) from this lap; open "
+                        "http://<the Pi's address>:PORT (default 5000).")
     p.add_argument("--debug-dir", default="route_follow_debug")
     p.add_argument("--no-window", action="store_true", help="Do not open the live trajectory window.")
     p.add_argument("--record", nargs="?", const="route_follow_debug/run.mp4", default=None,

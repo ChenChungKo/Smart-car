@@ -45,6 +45,7 @@ def main():
     ap.add_argument("--auto", action="store_true", help="do not wait for Enter between laps")
     ap.add_argument("--keep-going", action="store_true", help="carry on after a lap that did not finish")
     ap.add_argument("--first", type=int, default=1, help="number of the first lap (to add to earlier ones)")
+    ap.add_argument("--dashboard", action="store_true", help="serve the web dashboard (port 5000) during every lap")
     args = ap.parse_args()
     rows = []
     for n in range(args.first, args.first + args.laps):
@@ -57,7 +58,8 @@ def main():
         with open(lap_dir / "run.log", "w", encoding="utf-8") as log:
             proc = subprocess.Popen(
                 [sys.executable, "-u", "route_follow.py", "--hug", "--return-home", "--arm", "--no-window",
-                 "--debug-dir", str(lap_dir.relative_to(SERVER)), "--record", str((lap_dir / "run.mp4").relative_to(SERVER))],
+                 "--debug-dir", str(lap_dir.relative_to(SERVER)), "--record", str((lap_dir / "run.mp4").relative_to(SERVER))]
+                + (["--dashboard", "5000"] if args.dashboard else []),
                 cwd=SERVER, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             try:
                 for line in proc.stdout:
