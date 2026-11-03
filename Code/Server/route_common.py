@@ -47,7 +47,9 @@ BLIND_SLANT_GAP_M = 0.16   # nearer than this to the block, only the straight lo
 SIDE_CLEAR_MIN_M = 0.085  # side ultrasonic reading beside a block: less than this is under 2.5 cm between body and block
 PASS_MARGIN_M = 0.08   # the tail clears the block's far face by this much before strafing back (pose drifts a few cm)
 WALL_ECHO_M = 0.16     # what the camera sees this close to where the pose puts the wall ahead is the wall
-CLEAR_MARGIN_M = 0.03  # PLANNING margin: a detour strafes until the path is clear by this much
+CLEAR_MARGIN_M = 0.05  # PLANNING margin: a detour strafes until the path is clear by this much. It has to hold the
+# camera's edge error (2 cm) and the error of the strafes after the last tag fix: with 3 cm, lap 13 (2026-11-03) planned
+# a pass 1.5-3 cm above B1 and the right front wheel hit the block's near face.
 BLOCK_OWN_M = 0.08  # a point this near the fitted outline of the block being passed is that block
 MEASURE_NOISE_M = 0.02  # how far apart two looks put the same block edge
 # STOP margin: only something this close to the body's width is in the way. Planning and stopping must not use the same
