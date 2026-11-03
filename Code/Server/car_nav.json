@@ -85,7 +85,7 @@
   "imu": {
     "model": "GY-95T",
     "port": "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0",
-    "gyro_z_scale": 0.989,
-    "note": "2026-11-03 hand-turn test (tools/imu_record.py): the gyro z read 363.4 / 364.0 / 182.3 deg for 360 cw / 360 ccw / 180 cw, so the angle is the reading x 0.989. Not checked against a ruler or the tags yet. Axes: IMU X = car rear, Y = car right, Z = up (z gyro + = counter-clockwise)."
+    "gyro_z_scale": 1.0,
+    "note": "2026-11-03 checked against the arena tags (tools/imu_live.py --align, route_follow_debug/imu/align_20261103.txt): 7 counter-clockwise turns of 41-50 deg, 318 deg in all; the raw gyro z agrees with the tags to 0.03 % (per turn 0-1.9 % short, std 0.7 %), so the scale is 1.000. The earlier 0.989 came from turning the car by hand back to where it started, which overshot by about 1 %. Clockwise turns not checked against the tags yet. Axes: IMU X = car rear, Y = car right, Z = up (z gyro + = counter-clockwise)."
   }
 }
