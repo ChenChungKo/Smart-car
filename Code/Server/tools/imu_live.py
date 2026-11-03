@@ -8,6 +8,7 @@
 a tag fix of the heading, measures the gyro bias, and from then on shows heading = that fix + the gyro's turning. Enter
 takes a new tag fix and prints how far the gyro heading had drifted from it (that is the check of the gyro against the tags).
 Nothing is written to the module; the module's own yaw is only shown, shifted to the heading at alignment.
+Every alignment and every check is also appended to route_follow_debug/imu/align_<date>.txt.
 Ctrl+C = quit. The IMU port and the cameras have one owner at a time: close the dashboard and other programs first.
 """
 import argparse
@@ -62,6 +63,15 @@ class TagHeading:
                 pass
 
 
+LOG = pathlib.Path(__file__).resolve().parents[1] / "route_follow_debug" / "imu" / f"align_{time.strftime('%Y%m%d')}.txt"
+
+
+def log(line: str) -> None:
+    LOG.parent.mkdir(parents=True, exist_ok=True)
+    with open(LOG, "a", encoding="utf-8") as f:
+        f.write(f"{time.strftime('%H:%M:%S')} {line}\n")
+
+
 def wrap_deg(a: float) -> float:
     return (a + 180.0) % 360.0 - 180.0
 
@@ -95,6 +105,7 @@ def main() -> None:
         gyro.mark()
         note = (f"aligned by tags: {heading:+.1f} deg (spread {first[1]:.1f}, {first[2]} fits, rms {first[3]:.1f} px); "
                 f"gyro bias {bias:+.3f} deg/s")
+        log(f"START {note}; gyro scale {scale:.3f}; module yaw {module_at_align:+.2f}")
     gyro_yaw, yaw_zero, last_t, last_frames, last_check, rate = 0.0, 0.0, None, 0, time.monotonic(), 0.0
     clear = "\x1b[2J\x1b[H" if sys.stdout.isatty() else ""
     try:
@@ -117,10 +128,14 @@ def main() -> None:
                     again = tags.measure()
                     if again is None:
                         note = "no tag fix this time; the gyro heading is kept"
+                        log(f"CHECK no tag fix; gyro {heading:+.1f}")
                     else:
                         error = wrap_deg(heading - again[0])
                         note = (f"tag fix {again[0]:+.1f} deg (rms {again[3]:.1f} px); gyro had {heading:+.1f}: "
                                 f"gyro - tags = {error:+.1f} deg; heading re-aligned to the tags")
+                        log(f"CHECK tags {again[0]:+.1f} (spread {again[1]:.1f}, {again[2]} fits, rms {again[3]:.1f} px) "
+                            f"gyro {heading:+.1f} diff {error:+.1f} module yaw shifted "
+                            f"{wrap_deg(s.rpy_deg[2] - module_at_align + first[0]) if s else float('nan'):+.1f}")
                         heading = again[0]
                         gyro.mark()
                 else:
