@@ -67,6 +67,13 @@ def create_app(hub: Hub, arena: dict, car: dict) -> Flask:
         s["server_time"] = time.time()
         return jsonify(s)
 
+    @app.route("/api/imu/zero", methods=["POST"])
+    def imu_zero():
+        from dashboard import imu_feed
+        if imu_feed.FEED is not None:
+            imu_feed.FEED.zero()
+        return jsonify(ok=True)
+
     @app.route("/stream/map")
     def stream_map():
         layers = set((request.args.get("layers") or ",".join(DEFAULT_LAYERS)).split(","))
@@ -174,6 +181,21 @@ svg text{fill:var(--mute);font-size:10px}pre{margin:0;max-height:150px;overflow:
     <g id="irdots"></g></svg>
    <div class="mute" style="font-size:12px">紅外線：亮＝有東西（只對反光的表面有反應，灰牆、黑色看不到）</div></div>
   <div class="card"><h2>日誌</h2><pre id="log"></pre></div>
+  <div class="card" style="grid-column:1/-1"><h2>IMU（GY-95T）　<span id="imustat" class="mute"></span></h2>
+   <div class="grid2"><table>
+    <tr><td>加速度 x / y / z（g）</td><td id="imu_acc">-</td></tr>
+    <tr><td>陀螺儀 x / y / z（°/s）</td><td id="imu_gyro">-</td></tr>
+    <tr><td>模組姿態 roll / pitch / yaw（°）</td><td id="imu_rpy">-</td></tr>
+    <tr><td>陀螺儀 z 積分（°）</td><td><b id="imu_int">-</b> <button onclick="fetch('/api/imu/zero',{method:'POST'})">歸零</button>
+      <span class="mute">（手轉車子，逆時針為正）</span></td></tr>
+    <tr><td>磁力計 x / y / z（高斯）</td><td id="imu_mag">-</td></tr>
+    <tr><td>溫度</td><td id="imu_temp">-</td></tr></table>
+   <svg viewBox="0 0 200 120" width="100%" style="max-height:140px"><circle cx="60" cy="60" r="48" fill="none" stroke="currentColor" opacity=".35"/>
+    <g id="imu_arrow"><path d="M60 16 L68 40 L52 40 Z" fill="#d23b3b"/><line x1="60" y1="60" x2="60" y2="40" stroke="#d23b3b" stroke-width="3"/></g>
+    <text x="60" y="12" text-anchor="middle">模組 yaw</text>
+    <circle cx="150" cy="60" r="48" fill="none" stroke="currentColor" opacity=".35"/>
+    <g id="imu_arrow2"><path d="M150 16 L158 40 L142 40 Z" fill="#2f6fdb"/><line x1="150" y1="60" x2="150" y2="40" stroke="#2f6fdb" stroke-width="3"/></g>
+    <text x="150" y="12" text-anchor="middle">陀螺儀積分</text></svg></div></div>
  </div>
 </section></main>
 <script>
@@ -213,6 +235,14 @@ async function tick(){
     $('sonic').textContent=s.sonic_cm!=null?s.sonic_cm.toFixed(1)+' cm（轉向 '+(s.sonic_pan_deg||0)+'°）':'沒有回應';
     $('tags').textContent=s.tags_seen?Object.entries(s.tags_seen).map(([c,t])=>({front:'前',rear:'後',left:'左',right:'右',gimbal:'雲台'})[c]+':'+(t.length?t.join(','):'無')).join('　'):'-';
     $('note').textContent=s.status||s.pose_note||'-';
+    const m=s.imu;
+    if(m){const f=(a,d)=>a.map(v=>v.toFixed(d)).join(' / ');
+      $('imu_acc').textContent=f(m.acc_g,3);$('imu_gyro').textContent=f(m.gyro_dps,2);$('imu_rpy').textContent=f(m.rpy_deg,2);
+      $('imu_int').textContent=m.gyro_yaw_deg.toFixed(1);$('imu_mag').textContent=f(m.mag_gauss,3)+'（總強度 '+Math.hypot(...m.mag_gauss).toFixed(2)+'，校準等級 '+m.mag_level+'）';
+      $('imu_temp').textContent=m.temperature_c.toFixed(1)+' °C';
+      $('imustat').textContent=m.rate_hz+' 筆/秒，錯誤封包 '+m.bad_frames+(m.age_s>1?'，已停止更新':'');
+      $('imu_arrow').setAttribute('transform','rotate('+(-m.rpy_deg[2])+' 60 60)');$('imu_arrow2').setAttribute('transform','rotate('+(-m.gyro_yaw_deg)+' 150 60)')}
+    else{$('imustat').textContent='沒有收到資料';['imu_acc','imu_gyro','imu_rpy','imu_int','imu_mag','imu_temp'].forEach(i=>$(i).textContent='-')}
     Object.keys(IR).forEach(k=>{const c=$('ir_'+k);if(c)c.setAttribute('fill',s.ir&&s.ir[k]?'#d23b3b':'#8c93a3')});
     $('log').textContent=(s.log||[]).slice(-14).join('\n');
   }catch(e){$('conn').textContent='連不上';$('conn').className='pill bad'}

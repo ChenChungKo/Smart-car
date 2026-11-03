@@ -54,6 +54,8 @@ def attach(follower, port: int = 5000) -> None:
             HUB.set_state(sonic_cm=value, sonic_pan_deg=getattr(follower, "pan_deg", 0.0))
             return value
         follower.sensors.read_sonic = read_sonic
+    from dashboard import imu_feed
+    imu_feed.start(HUB)
     start_server(HUB, arena, car, port=port)
     threading.Thread(target=_feed, args=(follower,), daemon=True).start()
     print(f"dashboard: http://<the Pi's address>:{port}", flush=True)

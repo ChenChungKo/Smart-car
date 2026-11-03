@@ -85,6 +85,8 @@ class LiveSource:
             self._thread(self._detect_loop)
         if self.want_sensors:
             self._thread(self._sensor_loop)
+            from dashboard import imu_feed
+            self.imu_feed = imu_feed.start(self.hub)
         self._thread(self._pose_loop)
 
     def _thread(self, target, *args) -> None:
@@ -211,6 +213,8 @@ class LiveSource:
                 pass
         for cap in self.caps.values():
             cap.release()
+        if getattr(self, "imu_feed", None) is not None:
+            self.imu_feed.close()
         if self.sensors is not None:
             try:
                 self.sensors.close()
