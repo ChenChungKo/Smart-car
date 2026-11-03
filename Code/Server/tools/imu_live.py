@@ -3,7 +3,8 @@
 
     python3 tools/imu_live.py
 
-Enter = zero the integrated gyro z (turn the car by hand and read how far it says it turned; counter-clockwise is +).
+Enter = zero the integrated gyro z and the shown module yaw (turn the car by hand and read how far it turned; counter-clockwise is +;
+the module's own yaw is only shifted on the screen, nothing is written to the module).
 Ctrl+C = quit. The port has one reader at a time: close the dashboard and imu_check first.
 """
 import math
@@ -18,7 +19,7 @@ from imu import Gy95t  # noqa: E402
 
 def main() -> None:
     imu = Gy95t().start()
-    gyro_yaw, last_t, last_frames, last_check, rate = 0.0, None, 0, time.monotonic(), 0.0
+    gyro_yaw, yaw_zero, last_t, last_frames, last_check, rate = 0.0, 0.0, None, 0, time.monotonic(), 0.0
     clear = "\x1b[2J\x1b[H" if sys.stdout.isatty() else ""
     try:
         while True:
@@ -33,6 +34,7 @@ def main() -> None:
             if select.select([sys.stdin], [], [], 0)[0]:
                 sys.stdin.readline()
                 gyro_yaw = 0.0
+                yaw_zero = s.rpy_deg[2] if s is not None else 0.0
             if s is None:
                 out = "no data from the IMU (is /dev/ttyUSB0 there? is another program reading it?)"
             else:
@@ -40,7 +42,7 @@ def main() -> None:
                 out = (f"GY-95T   {rate:3.0f} frames/s   bad {imu.bad_frames}   age {now - s.t:.2f} s\n\n"
                        f"acc   x {s.acc_g[0]:+8.3f}   y {s.acc_g[1]:+8.3f}   z {s.acc_g[2]:+8.3f}   g\n"
                        f"gyro  x {s.gyro_dps[0]:+8.2f}   y {s.gyro_dps[1]:+8.2f}   z {s.gyro_dps[2]:+8.2f}   deg/s\n"
-                       f"module roll {s.rpy_deg[0]:+8.2f}   pitch {s.rpy_deg[1]:+8.2f}   yaw {s.rpy_deg[2]:+8.2f}   deg\n"
+                       f"module roll {s.rpy_deg[0]:+8.2f}   pitch {s.rpy_deg[1]:+8.2f}   yaw {(s.rpy_deg[2] - yaw_zero + 180) % 360 - 180:+8.2f}   deg\n"
                        f"mag   x {s.mag_gauss[0]:+8.3f}   y {s.mag_gauss[1]:+8.3f}   z {s.mag_gauss[2]:+8.3f}   gauss"
                        f"   |{mag:.2f}|  level {s.mag_level}\n"
                        f"temperature {s.temperature_c:.1f} C\n\n"
