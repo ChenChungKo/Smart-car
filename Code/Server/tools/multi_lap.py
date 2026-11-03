@@ -48,8 +48,13 @@ def main():
     ap.add_argument("--first", type=int, default=1, help="number of the first lap (to add to earlier ones)")
     ap.add_argument("--dashboard", action="store_true", help="serve the web dashboard (port 5000) during every lap")
     ap.add_argument("--no-ir", action="store_true", help="do not use the IR sensors (dark surfaces absorb the light)")
-    ap.add_argument("route_args", nargs=argparse.REMAINDER, help="after --: more route_follow.py options")
-    args = ap.parse_args()
+    argv = sys.argv[1:]
+    route_args = argv[argv.index("--") + 1:] if "--" in argv else []      # after --: more route_follow.py options
+    args = ap.parse_args(argv[:argv.index("--")] if "--" in argv else argv)
+    taken = [n for n in range(args.first, args.first + args.laps) if (OUT / f"lap{n}" / "run.log").exists()]
+    if taken:
+        raise SystemExit(f"lap{taken[0]} already has a run.log in {OUT}: start at a new number with --first "
+                         f"(the laps so far: {sorted(int(d.name[3:]) for d in OUT.glob('lap[0-9]*'))[-1]} is the last)")
     rows = []
     for n in range(args.first, args.first + args.laps):
         if not args.auto:
@@ -63,7 +68,7 @@ def main():
                 [sys.executable, "-u", "route_follow.py", "--hug", "--return-home", "--arm", "--no-window",
                  "--debug-dir", str(lap_dir.relative_to(SERVER)), "--record", str((lap_dir / "run.mp4").relative_to(SERVER))]
                 + (["--dashboard", "5000"] if args.dashboard else []) + (["--no-ir"] if args.no_ir else [])
-                + [a for a in args.route_args if a != "--"],
+                + route_args,
                 cwd=SERVER, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             try:
                 for line in proc.stdout:
