@@ -60,6 +60,8 @@ class Gy95t:
         self._sample: ImuSample | None = None
         self.frames = 0
         self.bad_frames = 0
+        self._raw_yaw_deg = 0.0       # integral of the gyro z since start, no bias removed
+        self._raw_yaw_t: float | None = None
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True, name="gy95t")
 
@@ -74,6 +76,11 @@ class Gy95t:
     def latest(self) -> ImuSample | None:
         with self._lock:
             return self._sample
+
+    def yaw_integral(self) -> tuple[float, float | None]:
+        """(deg, time.monotonic() of the last frame in it): the gyro z summed over every frame since start."""
+        with self._lock:
+            return self._raw_yaw_deg, self._raw_yaw_t
 
     def _run(self) -> None:
         buf = bytearray()
@@ -99,6 +106,63 @@ class Gy95t:
                             del buf[:i + FRAME_LEN]
                             self.frames += 1
                             with self._lock:
+                                if self._raw_yaw_t is not None:
+                                    self._raw_yaw_deg += sample.gyro_dps[2] * min(sample.t - self._raw_yaw_t, 0.1)
+                                self._raw_yaw_t = sample.t
                                 self._sample = sample
             except (serial.SerialException, OSError):
                 time.sleep(1.0)                                   # unplugged: try again
+
+
+class YawGyro:
+    """Heading change of the car from the z gyro (z up, counter-clockwise +, the same as the map's yaw).
+
+    take() is the angle turned since the last take() or mark(), minus the bias, times the scale; the pose code calls
+    take() after every move and mark() whenever the pose is replaced by a measurement, so the gyro only ever adds the
+    turn the measurement has not seen yet.
+    """
+    STALE_S = 0.5
+
+    def __init__(self, imu: Gy95t, scale: float = 1.0, bias_dps: float = 0.0):
+        self.imu = imu
+        self.scale = scale
+        self.bias_dps = bias_dps
+        self._deg, self._t = imu.yaw_integral()
+
+    def calibrate(self, seconds: float = 2.0) -> tuple[float, float]:
+        """Bias of the gyro z (deg/s, mean) and its noise (std) from `seconds` of standing still; sets the bias."""
+        values, last, end = [], None, time.monotonic() + seconds
+        while time.monotonic() < end:
+            s = self.imu.latest()
+            if s is not None and s is not last:
+                values.append(s.gyro_dps[2])
+                last = s
+            time.sleep(0.005)
+        if len(values) < 20:
+            return self.bias_dps, float("inf")
+        mean, std = sum(values) / len(values), (sum((v - sum(values) / len(values)) ** 2 for v in values) / len(values)) ** 0.5
+        self.bias_dps = mean
+        self.mark()
+        return mean, std
+
+    def fresh(self) -> bool:
+        _deg, t = self.imu.yaw_integral()
+        return t is not None and time.monotonic() - t < self.STALE_S
+
+    def mark(self) -> None:
+        self._deg, self._t = self.imu.yaw_integral()
+
+    def take(self) -> tuple[float, float] | None:
+        """(radians turned, seconds it covers) since the last take()/mark(); None when the gyro is not sending."""
+        if not self.fresh():
+            return None
+        deg, t = self.imu.yaw_integral()
+        seconds = 0.0 if self._t is None else t - self._t
+        turned = ((deg - self._deg) - self.bias_dps * seconds) * self.scale
+        self._deg, self._t = deg, t
+        return turned * 3.141592653589793 / 180.0, seconds
+
+    @staticmethod
+    def sigma(radians: float, seconds: float) -> float:
+        """1 sigma of that angle: the scale is good to ~1.5 %, the bias to ~0.03 deg/s, plus a floor."""
+        return ((0.015 * radians) ** 2 + (0.03 * 3.141592653589793 / 180.0 * seconds) ** 2 + (0.002) ** 2) ** 0.5

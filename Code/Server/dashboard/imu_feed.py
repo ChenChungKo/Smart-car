@@ -10,9 +10,9 @@ FEED: "ImuFeed | None" = None
 
 
 class ImuFeed:
-    def __init__(self, hub):
+    def __init__(self, hub, imu: Gy95t | None = None):
         self.hub = hub
-        self.imu = Gy95t().start()
+        self.imu = imu or Gy95t().start()          # the lap's own reader when there is one: the port has one reader
         self.stop = threading.Event()
         self.gyro_yaw = 0.0           # deg, gyro z integrated since the last zero (counter-clockwise seen from above = +)
         self.last_t: float | None = None
@@ -25,7 +25,6 @@ class ImuFeed:
 
     def close(self) -> None:
         self.stop.set()
-        self.imu.close()
 
     def _run(self) -> None:
         last_frames, last_check = 0, time.monotonic()
@@ -50,7 +49,7 @@ class ImuFeed:
             time.sleep(0.1)
 
 
-def start(hub) -> ImuFeed:
+def start(hub, imu: Gy95t | None = None) -> ImuFeed:
     global FEED
-    FEED = ImuFeed(hub)
+    FEED = ImuFeed(hub, imu)
     return FEED

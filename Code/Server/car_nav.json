@@ -81,5 +81,11 @@
     "pivot_x_m": 0.085,
     "arm_m": 0.03,
     "note": "雲台超音波探頭面：在左右轉軸前方 arm_m，轉軸在車心前 pivot_x_m。2026-10-18 實測：朝正前方時探頭面在車頭邊緣內 3 cm，朝左右 90 度時在車側內 6 cm（車寬 18 cm）。"
+  },
+  "imu": {
+    "model": "GY-95T",
+    "port": "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0",
+    "gyro_z_scale": 0.989,
+    "note": "2026-11-03 hand-turn test (tools/imu_record.py): the gyro z read 363.4 / 364.0 / 182.3 deg for 360 cw / 360 ccw / 180 cw, so the angle is the reading x 0.989. Not checked against a ruler or the tags yet. Axes: IMU X = car rear, Y = car right, Z = up (z gyro + = counter-clockwise)."
   }
 }

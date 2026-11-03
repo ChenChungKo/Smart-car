@@ -27,6 +27,7 @@ from types import SimpleNamespace
 from dataclasses import dataclass
 
 from aruco_localizer import Pose2D
+from imu import YawGyro
 from route_follow import Abort, RouteFollower
 
 IR_RANGE_M = 0.08
@@ -53,6 +54,8 @@ class MotionError:
     corner_bias: tuple = (0.0, 0.0, 0.0)  # tag fixes at home itself (6 cm) are off by this (x m, y m, yaw deg): close tags
     fix_outlier: float = 0.0       # share of tag fixes that are wrong: 12-20 cm off, heading up to 35 deg off
     realistic_fixes: bool = True   # tag noise grows with the nearest tag's distance (else 1 cm / 1 deg)
+    gyro_scale_error: float = 0.01  # the gyro's angle is this much off after the calibration scale (1 % = a bad calibration)
+    gyro_bias_dps: float = 0.02    # what is left of the gyro bias after it was measured at the start (1 sigma, per run)
     fix_loss: float = 0.0          # share of tag looks that give no fix (far tags only): position is dead-reckoned
     fix_sigma_m: float = 0.01      # tag fix noise
     fix_sigma_deg: float = 1.0
@@ -142,6 +145,30 @@ class SimScanner:
         pass
 
 
+class SimGyro:
+    """The z gyro of the simulated car: the true heading change, with a scale error and a bias left over."""
+
+    def __init__(self, world, error: MotionError):
+        self.world = world
+        rng = random.Random(f"gyro{world.truth[0]:.4f}{world.truth[1]:.4f}{error.gyro_scale_error}")   # the other draws stay as they were
+        self.scale = 1.0 + error.gyro_scale_error * rng.choice((-1.0, 1.0))
+        self.bias_dps = rng.gauss(0.0, error.gyro_bias_dps)
+        self.mark()
+
+    def mark(self) -> None:
+        self._yaw, self._t = self.world.truth[2], self.world.time
+
+    def take(self) -> tuple[float, float]:
+        yaw, t = self.world.truth[2], self.world.time
+        seconds = t - self._t
+        turned = math.atan2(math.sin(yaw - self._yaw), math.cos(yaw - self._yaw)) * self.scale \
+            + math.radians(self.bias_dps) * seconds
+        self._yaw, self._t = yaw, t
+        return turned, seconds
+
+    sigma = staticmethod(YawGyro.sigma)
+
+
 class SimFollower(RouteFollower):
     def __init__(self, args, world, error: MotionError | None = None, max_moves: int = 2000):
         super().__init__(args)
@@ -154,6 +181,8 @@ class SimFollower(RouteFollower):
         self.stop_event = _Clock(world)
         self.sensors = _Sensors(self)
         self.servo = _Servo(self)
+        if getattr(args, "imu", True) and "imu" in self.car:
+            self.gyro = SimGyro(world, self.error)
         if args.hug and args.detour and args.camera_obstacles and hasattr(world, "foot_view"):
             self.scanner = SimScanner(world)
 
@@ -162,6 +191,9 @@ class SimFollower(RouteFollower):
     def start(self):
         self.motor = object()  # motion is on; drive()/stop() below never touch it
         print("SIMULATION: motors, ultrasonic, IR and tag fixes come from the simulated world", flush=True)
+        if self.gyro is not None:
+            print(f"IMU gyro z (simulated): scale {self.gyro.scale:.3f} of the true turn, bias {self.gyro.bias_dps:+.3f} deg/s",
+                  flush=True)
 
     def drive(self, pwm):
         pass

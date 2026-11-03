@@ -215,6 +215,7 @@ class LiveSource:
             cap.release()
         if getattr(self, "imu_feed", None) is not None:
             self.imu_feed.close()
+            self.imu_feed.imu.close()
         if self.sensors is not None:
             try:
                 self.sensors.close()

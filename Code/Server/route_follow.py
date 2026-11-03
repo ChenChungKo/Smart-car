@@ -43,7 +43,8 @@ class RouteFollower(MotionMixin, LocalizationMixin, PerceptionMixin, DetourMixin
         self.servo = None
         self.home_pan, self.home_tilt = 90, 90
         self.right_90_pan, self.left_90_pan = 180, 0
-        self.pose: Pose2D | None = None
+        self.gyro = None                      # imu.YawGyro: the heading change of every move, from the z gyro
+        self._pose: Pose2D | None = None
         self.trail: list[tuple[float, float, float]] = []
         self.stop_event = threading.Event()
         self.sonic_misses = 0
@@ -101,6 +102,17 @@ class RouteFollower(MotionMixin, LocalizationMixin, PerceptionMixin, DetourMixin
             self.hug_poses = self.build_hug_poses()
             self.route = [(x, y) for x, y, _ in self.hug_poses] + [self.hug_poses[0][:2]]
 
+    @property
+    def pose(self) -> Pose2D | None:
+        return self._pose
+
+    @pose.setter
+    def pose(self, value: Pose2D | None) -> None:
+        """A new pose (a measurement, a fix) has already seen the turning so far: the gyro starts counting again."""
+        self._pose = value
+        if self.gyro is not None:
+            self.gyro.mark()
+
     # ---- hardware -------------------------------------------------------
 
     def start(self):
@@ -138,6 +150,7 @@ class RouteFollower(MotionMixin, LocalizationMixin, PerceptionMixin, DetourMixin
             except Exception as exc:  # noqa: BLE001
                 print(f"WARNING gimbal camera unavailable ({exc}); obstacles from the ultrasonic and IR only",
                       flush=True)
+        self.start_gyro()
         if self.args.arm:
             battery = read_battery_voltage()
             if battery is None:
@@ -156,6 +169,32 @@ class RouteFollower(MotionMixin, LocalizationMixin, PerceptionMixin, DetourMixin
             self.motor = Ordinary_Car()
         else:
             print("DRY-RUN: no motor object; decisions are printed only.", flush=True)
+
+    def start_gyro(self) -> None:
+        """The z gyro of the GY-95T, bias measured now (the car stands still while it starts)."""
+        if not getattr(self.args, "imu", True) or "imu" not in self.car:
+            return
+        try:
+            from imu import Gy95t, YawGyro
+
+            imu = Gy95t(self.car["imu"].get("port")).start()
+            gyro = YawGyro(imu, scale=float(self.car["imu"].get("gyro_z_scale", 1.0)))
+            deadline = time.monotonic() + 3.0
+            while not gyro.fresh() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            if not gyro.fresh():
+                imu.close()
+                print("WARNING IMU sends nothing; the heading between tag fixes comes from the turn rates", flush=True)
+                return
+            bias, std = gyro.calibrate(2.0)
+            if std > 0.3:
+                imu.close()
+                print(f"WARNING IMU not still while measuring its bias (noise {std:.2f} deg/s); not used", flush=True)
+                return
+            self.gyro = gyro
+            print(f"IMU gyro z: bias {bias:+.3f} deg/s (noise {std:.3f}), scale {gyro.scale:.3f}", flush=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"WARNING IMU unavailable ({exc}); the heading between tag fixes comes from the turn rates", flush=True)
 
     def request_stop(self, *_args):
         self.stop_event.set()
@@ -191,6 +230,8 @@ class RouteFollower(MotionMixin, LocalizationMixin, PerceptionMixin, DetourMixin
                 pass
         if self.sensors is not None:
             self.sensors.close()
+        if self.gyro is not None:
+            self.gyro.imu.close()
         for grabber in self.grabbers.values():
             grabber.close()
         self.save_map()

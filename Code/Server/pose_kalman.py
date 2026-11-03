@@ -101,8 +101,11 @@ class PoseKalman:
 
     # ---- prediction: how far each kind of move is to be trusted ------------
 
-    def predict(self, kind: str, amount: float) -> None:
-        """Grow the covariance after a move: `amount` is metres for drives and strafes, radians for turns."""
+    def predict(self, kind: str, amount: float, heading_sigma: float | None = None) -> None:
+        """Grow the covariance after a move: `amount` is metres for drives and strafes, radians for turns.
+
+        `heading_sigma` (rad): the heading change was measured (gyro) with this uncertainty; it replaces the guessed
+        turn of the move (the turn rate, the strafe and drift turn)."""
         yaw = float(self.x[2])
         amount = abs(amount)
         if kind in ("forward", "reverse"):
@@ -113,6 +116,8 @@ class PoseKalman:
         else:  # turns in place
             along = across = 0.004 + 0.01 * amount
             turn = 0.15 * amount + math.radians(0.5)  # the turn rate is only good to ~15 % (battery, floor)
+        if heading_sigma is not None:
+            turn = heading_sigma
         c, s = math.cos(yaw), math.sin(yaw)
         rot = np.array([[c, -s], [s, c]])
         local = np.diag([along ** 2, across ** 2])

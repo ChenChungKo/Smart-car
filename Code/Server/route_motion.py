@@ -81,6 +81,19 @@ class MotionMixin:
         """Turn rate (deg/s) of "left" or "right": car_nav.json, scaled by what the last turns really did."""
         return float(self.motion["turn_left_dps" if kind == "left" else "turn_right_dps"]) * self.turn_scale[kind]
 
+    def learn_turn_from_gyro(self, kind: str, commanded: float, done: float) -> None:
+        """What the gyro measured of a turn corrects the rate used for the next ones (battery, floor); see learn_turn."""
+        if abs(commanded) < math.radians(10.0) or not self.args.learn_motion:
+            return
+        ratio = done / commanded
+        if not 0.4 < ratio < 1.8:
+            return
+        scale = min(max(self.turn_scale[kind] * (0.5 + 0.5 * ratio), 0.7), 1.4)
+        if abs(scale - self.turn_scale[kind]) >= 0.03:
+            print(f"    turn {kind}: asked {math.degrees(commanded):+.0f}deg, gyro {math.degrees(done):+.0f}deg; "
+                  f"rate now {self.turn_rate(kind) * scale / self.turn_scale[kind]:.0f}deg/s", flush=True)
+        self.turn_scale[kind] = scale
+
     def learn_strafe(self, fix_yaw: float) -> None:
         """A tag fix after a long enough strafe says how much it turned the car: learn deg per metre.
 
@@ -88,7 +101,7 @@ class MotionMixin:
         add up until a fix arrives; under 8 cm in all the turn is lost in the noise of the fix.
         """
         acc, self.strafe_acc = self.strafe_acc, None
-        if acc is None or abs(acc[1]) < 0.08 or not self.args.learn_motion:
+        if self.gyro is not None or acc is None or abs(acc[1]) < 0.08 or not self.args.learn_motion:
             return
         sample = wrap_rad(fix_yaw - acc[0]) / acc[1]
         if abs(sample) > 3.0:  # more than 170 deg per metre: not this (a re-localization, a turn in between)
@@ -106,7 +119,7 @@ class MotionMixin:
         turns of 25 deg or more teach (a small one is as noisy as the fix), and a rate moves half way to what
         was seen, within 0.7 to 1.4 times the calibration.
         """
-        if self.last_turn is None or not self.args.learn_motion:
+        if self.last_turn is None or not self.args.learn_motion or self.gyro is not None:
             self.last_turn = None
             return
         kind, before, commanded = self.last_turn
@@ -124,20 +137,25 @@ class MotionMixin:
         self.turn_scale[kind] = scale
 
     def dead_reckon(self, kind: str, elapsed: float):
+        """Move the pose by what the move did. The heading change is what the z gyro measured since the pose was last
+        set (turn, drive drift and strafe turn all in one); without the gyro it is guessed from the turn rate, the
+        drift and the learned strafe turn."""
         if self.pose is None or elapsed <= 0.0:
             return
+        measured = self.gyro.take() if self.gyro is not None else None
         if self.use_filter and self.kalman.ready:
             amount = {"forward": float(self.motion["forward_mps"]), "reverse": float(self.motion["forward_mps"]),
                       "strafe_left": self.strafe_mps, "strafe_right": self.strafe_mps,
                       "left": math.radians(self.turn_rate("left")),
                       "right": math.radians(self.turn_rate("right"))}[kind] * elapsed
             self.kalman.sync(self.pose.x, self.pose.y, self.pose.yaw)
-            self.kalman.predict(kind, amount)
+            self.kalman.predict(kind, amount, None if measured is None else self.gyro.sigma(*measured))
         if kind in ("forward", "reverse"):
             step = float(self.motion["forward_mps"]) * elapsed * (1.0 if kind == "forward" else -1.0)
             # The car drifts left while driving straight; fold that into the expected heading.
-            self.pose.yaw = wrap_rad(
-                self.pose.yaw + math.radians(float(self.motion.get("drift_left_deg_per_m", 0.0))) * step)
+            turned = measured[0] if measured is not None else \
+                math.radians(float(self.motion.get("drift_left_deg_per_m", 0.0))) * step
+            self.pose.yaw = wrap_rad(self.pose.yaw + turned)
             self.pose.x += step * math.cos(self.pose.yaw)
             self.pose.y += step * math.sin(self.pose.yaw)
         elif kind in ("strafe_left", "strafe_right"):
@@ -147,11 +165,13 @@ class MotionMixin:
             self.strafe_acc[1] += side
             self.pose.x -= side * math.sin(self.pose.yaw)
             self.pose.y += side * math.cos(self.pose.yaw)
-            self.pose.yaw = wrap_rad(self.pose.yaw + self.strafe_yaw * side)  # the car turns while it strafes
-        elif kind == "left":
-            self.pose.yaw = wrap_rad(self.pose.yaw + math.radians(self.turn_rate("left") * elapsed))
-        elif kind == "right":
-            self.pose.yaw = wrap_rad(self.pose.yaw - math.radians(self.turn_rate("right") * elapsed))
+            # the car turns while it strafes
+            self.pose.yaw = wrap_rad(self.pose.yaw + (measured[0] if measured is not None else self.strafe_yaw * side))
+        elif kind in ("left", "right"):
+            guessed = math.radians(self.turn_rate(kind) * elapsed) * (1.0 if kind == "left" else -1.0)
+            self.pose.yaw = wrap_rad(self.pose.yaw + (measured[0] if measured is not None else guessed))
+            if measured is not None and self.last_turn is not None:
+                self.learn_turn_from_gyro(kind, self.last_turn[2], measured[0])
         self.pose.fixes = []
 
     # ---- wall geometry ------------------------------------------------------
@@ -240,6 +260,7 @@ class MotionMixin:
             shift, frac = best
             print(f"    only {math.degrees(abs(turn) * frac):.0f}deg of the turn is safe here", flush=True)
             duration *= frac
+            turn *= frac
         self.last_turn = (kind, self.pose.yaw, turn)
         step, side = shift
         if step:

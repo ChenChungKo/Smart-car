@@ -51,6 +51,8 @@ def parse_args(argv: list[str] | None = None):
                    help="Give up when the obstacle is still ahead after strafing this far off the lane.")
     p.add_argument("--home", default=None,
                    help="Known home pose 'x,y,yaw_deg' (overrides arena_map.json \"home\").")
+    p.add_argument("--no-imu", dest="imu", action="store_false",
+                   help="Do not use the gyro (GY-95T) for the heading between tag fixes.")
     p.add_argument("--no-ir", action="store_true")
     p.add_argument("--no-sonic", action="store_true")
     p.set_defaults(active_high=False)

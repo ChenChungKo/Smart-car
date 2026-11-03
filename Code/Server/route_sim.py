@@ -21,6 +21,7 @@ import argparse
 import contextlib
 import io
 import math
+import os
 import random
 import re
 import sys
@@ -34,7 +35,7 @@ from route_follow import Abort, parse_args as route_args
 from sim_hardware import IR_LAYOUT, IR_RANGE_M, MotionError, SimFollower, body_outline
 
 SERVER = Path(__file__).resolve().parent
-OUT = SERVER / "route_sim_debug"
+OUT = SERVER / os.environ.get("ROUTE_SIM_OUT", "route_sim_debug")  # a second run at the same time needs its own folder
 # Ready-made scenes (cm). "lap": one block in the middle of each --hug lane, as on the real arena.
 LAYOUTS = {
     "lap": ["65,75,8,28", "112,132,60,70", "60,80,118,128", "10,20,60,80"],
