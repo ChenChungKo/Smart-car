@@ -122,7 +122,8 @@ class _Sensors:
         return None if m is None else round(m * 100.0 + random.gauss(0.0, 0.5), 1)
 
     def read_ir(self) -> dict[str, int]:
-        return self.car.world.ir()
+        lit = self.car.world.ir()
+        return {k: 0 for k in lit} if getattr(self.car.args, "no_ir", False) else lit   # --no-ir: the pins are not read
 
     def close(self):
         pass

@@ -4,6 +4,7 @@
     python3 tools/multi_lap.py 5                 # 5 laps, wait for Enter before each (reposition, look at the car)
     python3 tools/multi_lap.py 5 --auto          # no waiting: the car parks at home, the next lap starts from there
     python3 tools/multi_lap.py 5 --keep-going    # carry on after a failed lap (default: stop at the first failure)
+    python3 tools/multi_lap.py 1 --no-ir         # without the IR sensors; other route_follow.py options after --
 
 Each lap runs gimbal_center.py, then route_follow.py --hug --return-home --arm, with
 route_follow_debug/lap<N>/ (run.log, run.mp4, looks/, trajectory.png). results.csv in route_follow_debug/ has one
@@ -46,6 +47,8 @@ def main():
     ap.add_argument("--keep-going", action="store_true", help="carry on after a lap that did not finish")
     ap.add_argument("--first", type=int, default=1, help="number of the first lap (to add to earlier ones)")
     ap.add_argument("--dashboard", action="store_true", help="serve the web dashboard (port 5000) during every lap")
+    ap.add_argument("--no-ir", action="store_true", help="do not use the IR sensors (dark surfaces absorb the light)")
+    ap.add_argument("route_args", nargs=argparse.REMAINDER, help="after --: more route_follow.py options")
     args = ap.parse_args()
     rows = []
     for n in range(args.first, args.first + args.laps):
@@ -59,7 +62,8 @@ def main():
             proc = subprocess.Popen(
                 [sys.executable, "-u", "route_follow.py", "--hug", "--return-home", "--arm", "--no-window",
                  "--debug-dir", str(lap_dir.relative_to(SERVER)), "--record", str((lap_dir / "run.mp4").relative_to(SERVER))]
-                + (["--dashboard", "5000"] if args.dashboard else []),
+                + (["--dashboard", "5000"] if args.dashboard else []) + (["--no-ir"] if args.no_ir else [])
+                + [a for a in args.route_args if a != "--"],
                 cwd=SERVER, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             try:
                 for line in proc.stdout:
