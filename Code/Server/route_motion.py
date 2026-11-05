@@ -29,11 +29,12 @@ class MotionMixin:
         fwd = int(self.motion["forward_pwm"])
         return (fwd, fwd, fwd, fwd)
 
-    def _pwm(self, kind: str):
+    def _pwm(self, kind: str, hold: float = 0.0):
+        """Wheel duties of a move; `hold` (-1..1, + = counter-clockwise) adds that share of the turn power on top."""
         fwd = self._forward_pwm()
         turn = int(self.motion["turn_pwm"])
         side = int(self.motion.get("strafe_pwm", 1200)) * (-1 if self.strafe_flip else 1)
-        return {
+        base = {
             "forward": fwd,
             "reverse": tuple(-v for v in fwd),
             "left": (-turn, -turn, turn, turn),
@@ -41,9 +42,28 @@ class MotionMixin:
             "strafe_left": (-side, side, side, -side),
             "strafe_right": (side, -side, -side, side),
         }[kind]
+        if not hold:
+            return base
+        c = hold * turn
+        return tuple(int(max(-4095, min(4095, v + d))) for v, d in zip(base, (-c, -c, c, c)))
 
-    def move(self, kind: str, duration: float) -> tuple[float, str | None]:
-        """Timed motion; forward segments stop early on a safety reason."""
+    @staticmethod
+    def hold_correction(turned: float) -> float:
+        """Share of the turn power that brings the heading back to where the move started (`turned` rad off)."""
+        return max(-HOLD_MAX, min(HOLD_MAX, -HOLD_MAX * math.degrees(turned) / HOLD_FULL_DEG))
+
+    def turn_done(self, turned: float, target: float) -> bool:
+        """A gyro turn stops when what is left is what the car turns on after the motors stop."""
+        return abs(turned) >= abs(target) - self.turn_coast
+
+    def learn_coast(self, at_stop: float, settled: float) -> None:
+        self.turn_coast = min(max(0.5 * self.turn_coast + 0.5 * (abs(settled) - abs(at_stop)), 0.0), math.radians(10.0))
+
+    def move(self, kind: str, duration: float, turn_rad: float | None = None) -> tuple[float, str | None]:
+        """Timed motion; forward segments stop early on a safety reason.
+
+        With the gyro: a turn given `turn_rad` runs until the gyro has that angle (the time is only a limit), and drives
+        and strafes hold the heading they started with (a mecanum strafe turns the car otherwise)."""
         if kind not in ("left", "right"):
             self.last_turn = None
         if kind not in ("strafe_left", "strafe_right"):
@@ -54,21 +74,40 @@ class MotionMixin:
                 raise Abort("stopped")
             return 0.0, None
         reason = None
+        gyro = self.gyro if self.gyro is not None and self.gyro.fresh() else None
+        turning = kind in ("left", "right")
+        closed_turn = gyro is not None and turning and turn_rad is not None
+        limit = 2.0 * duration + 0.5 if closed_turn else duration  # a gyro turn may take longer (battery, floor)
+        zero = gyro.peek() if gyro is not None else None
+        turned = 0.0
         started = time.monotonic()
         self.drive(self._pwm(kind))
         while not self.stop_event.is_set():
             elapsed = time.monotonic() - started
-            if elapsed >= duration:
+            now = gyro.peek() if gyro is not None else None
+            if now is not None:
+                turned = now - zero
+            if elapsed >= limit or (closed_turn and self.turn_done(turned, turn_rad)):
                 break
             if kind == "forward":
                 self.travel = float(self.motion["forward_mps"]) * elapsed  # the pose is only updated after
                 reason = self.safety_reason()
                 if reason:
                     break
-            time.sleep(0.04)
+            if gyro is not None and not turning:
+                self.drive(self._pwm(kind, self.hold_correction(turned)))
+            time.sleep(0.02)
         self.stop()
         self.travel = 0.0
         elapsed = time.monotonic() - started
+        if closed_turn:
+            at_stop = turned
+            time.sleep(TURN_COAST_S)
+            now = gyro.peek()
+            if now is not None:
+                self.learn_coast(at_stop, now - zero)
+                print(f"      [{kind}: asked {math.degrees(turn_rad):+.0f}deg, gyro {math.degrees(now - zero):+.1f}deg "
+                      f"in {elapsed:.2f}s]", flush=True)
         if self.stop_event.is_set():
             raise Abort("stopped")
         self.dead_reckon(kind, elapsed)
@@ -233,7 +272,8 @@ class MotionMixin:
         rate = self.turn_rate(kind)
         min_s = self.args.min_turn_s if min_s is None else min_s
         duration = min(max(math.degrees(abs(err)) / rate, min_s), self.args.max_turn_s)
-        turn = math.copysign(math.radians(rate * duration), err)
+        turn = math.copysign(math.radians(rate * duration), err)   # what the timed turn does (at least min_s)
+        target = math.copysign(min(abs(err), abs(turn)), err)      # what the gyro turn does (never more than checked)
         steps = [s * k * 0.02 for k in range(1, 11) for s in (1, -1)]
         shifts = [(0.0, 0.0)] + [(d, 0.0) for d in steps] + [(0.0, d) for d in steps if abs(d) <= 0.10]
         reachable = [s for s in shifts
@@ -261,6 +301,7 @@ class MotionMixin:
             print(f"    only {math.degrees(abs(turn) * frac):.0f}deg of the turn is safe here", flush=True)
             duration *= frac
             turn *= frac
+            target = math.copysign(min(abs(err), abs(turn)), err)
         self.last_turn = (kind, self.pose.yaw, turn)
         step, side = shift
         if step:
@@ -271,8 +312,8 @@ class MotionMixin:
             print(f"    wall too close to turn; strafe {'left' if side > 0 else 'right'} {abs(side) * 100:.0f}cm first",
                   flush=True)
             self.move("strafe_left" if side > 0 else "strafe_right", abs(side) / self.strafe_mps)
-        self.last_turn = (kind, self.pose.yaw, turn)
-        self.move(kind, duration)
+        self.last_turn = (kind, self.pose.yaw, turn if self.gyro is None else target)
+        self.move(kind, duration, turn_rad=target)
 
     def strafe(self, left: float, ahead_cap: bool = True) -> bool:
         """Mecanum sideways move by `left` m (negative = right); learns the strafe speed from the next fix.

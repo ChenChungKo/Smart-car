@@ -152,6 +152,14 @@ class YawGyro:
     def mark(self) -> None:
         self._deg, self._t = self.imu.yaw_integral()
 
+    def peek(self) -> float | None:
+        """Radians turned since the last take()/mark(), without moving the mark (for control during a move)."""
+        if not self.fresh():
+            return None
+        deg, t = self.imu.yaw_integral()
+        seconds = 0.0 if self._t is None else t - self._t
+        return ((deg - self._deg) - self.bias_dps * seconds) * self.scale * 3.141592653589793 / 180.0
+
     def take(self) -> tuple[float, float] | None:
         """(radians turned, seconds it covers) since the last take()/mark(); None when the gyro is not sending."""
         if not self.fresh():

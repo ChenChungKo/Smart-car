@@ -263,6 +263,10 @@ def main():
                    help="Share of tag fixes that are wrong (12-20 cm off, heading up to 35 deg off).")
     p.add_argument("--strafe-yaw", type=float, default=0.0,
                    help="Degrees the car turns per metre of strafe (the real one: about 90).")
+    p.add_argument("--start-delay", type=float, default=MotionError.start_delay_s,
+                   help="Seconds before the wheels move after a command (a short timed turn falls short).")
+    p.add_argument("--spin-up", type=float, default=MotionError.spin_up_s,
+                   help="Time constant (s) of the wheel speed following the command, starting and stopping.")
     p.add_argument("--fix-loss", type=float, default=0.0,
                    help="Share of tag looks that give no fix (far tags): the pose drifts like in the real lap.")
     a = p.parse_args(argv)
@@ -276,7 +280,7 @@ def main():
         print(f"{len(blocks_m)} obstacles from {a.world} (cm): " +
               ", ".join(f"x {b[0] * 100:.0f}~{b[1] * 100:.0f} y {b[2] * 100:.0f}~{b[3] * 100:.0f}" for b in blocks_m))
     error = MotionError(forward=a.forward_error, strafe=a.strafe_error, turn=a.turn_error, fix_loss=a.fix_loss,
-                         strafe_yaw_deg_per_m=a.strafe_yaw,
+                         strafe_yaw_deg_per_m=a.strafe_yaw, start_delay_s=a.start_delay, spin_up_s=a.spin_up,
                          fix_outlier=a.fix_outlier, realistic_fixes=not a.simple_fixes,
                          corner_bias=tuple(float(v) for v in a.corner_bias.split(",")))
     label = Path(a.world).stem if a.world else "custom" if a.blocks is not None else a.layout

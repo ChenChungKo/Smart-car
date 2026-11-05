@@ -51,6 +51,7 @@ class RouteFollower(MotionMixin, LocalizationMixin, PerceptionMixin, DetourMixin
         self.travel = 0.0  # forward distance of the move in progress, not yet in the pose
         self.strafe_yaw = 0.0  # rad the car turns per metre of strafe to the left (learned; negative = clockwise)
         self.strafe_acc: list[float] | None = None  # [yaw at the start, metres strafed (left +)] since the last fix
+        self.turn_coast = math.radians(2.0)  # rad the car still turns after the motors stop (learned from the gyro)
         self.turn_scale = {"left": 1.0, "right": 1.0}  # learned from tag fixes after turns (battery changes the rate)
         self.last_turn: tuple[str, float, float] | None = None  # (kind, yaw before, commanded turn rad), for learning
         self.closing_cm: float | None = None  # ultrasonic stop while closing in on an obstacle to go around

@@ -28,6 +28,7 @@ from dataclasses import dataclass
 
 from aruco_localizer import Pose2D
 from imu import YawGyro
+from route_common import TURN_COAST_S
 from route_follow import Abort, RouteFollower
 
 IR_RANGE_M = 0.08
@@ -51,6 +52,8 @@ class MotionError:
     turn: float = 0.97
     drift_deg_per_m: float = 4.0   # the real car drifts left while driving straight
     strafe_yaw_deg_per_m: float = 0.0  # a strafe to the left turns the car this much clockwise (unequal wheels)
+    start_delay_s: float = 0.10    # the wheels start this late (static friction): a short timed turn does half (lap 14)
+    spin_up_s: float = 0.05        # then the speed follows the command with this time constant, also when stopping
     corner_bias: tuple = (0.0, 0.0, 0.0)  # tag fixes at home itself (6 cm) are off by this (x m, y m, yaw deg): close tags
     fix_outlier: float = 0.0       # share of tag fixes that are wrong: 12-20 cm off, heading up to 35 deg off
     realistic_fixes: bool = True   # tag noise grows with the nearest tag's distance (else 1 cm / 1 deg)
@@ -159,6 +162,11 @@ class SimGyro:
     def mark(self) -> None:
         self._yaw, self._t = self.world.truth[2], self.world.time
 
+    def peek(self) -> float:
+        yaw, t = self.world.truth[2], self.world.time
+        return math.atan2(math.sin(yaw - self._yaw), math.cos(yaw - self._yaw)) * self.scale \
+            + math.radians(self.bias_dps) * (t - self._t)
+
     def take(self) -> tuple[float, float]:
         yaw, t = self.world.truth[2], self.world.time
         seconds = t - self._t
@@ -239,8 +247,10 @@ class SimFollower(RouteFollower):
         fixes = [SimpleNamespace(camera="front", tag_id=k, distance=d + 0.12 * k) for k in range(n)]
         return self.accept_fix(Pose2D(px, py, pyaw, fixes=fixes))
 
-    def move(self, kind: str, duration: float) -> tuple[float, str | None]:
-        """The same timed motion as on the car: forward stops early for a safety reason."""
+    def move(self, kind: str, duration: float, turn_rad: float | None = None) -> tuple[float, str | None]:
+        """The same motion as on the car (route_motion.move): timed, or with the gyro a turn to an angle and a heading
+        hold on drives and strafes; forward stops early for a safety reason. The wheels start late and the speed lags
+        the command (MotionError), so a short timed turn falls short and the car coasts after the stop."""
         m, e = self.motion, self.error
         if kind not in ("left", "right"):
             self.last_turn = None
@@ -256,32 +266,61 @@ class SimFollower(RouteFollower):
         }[kind]
         if self.strafe_flip:  # route_follow learned the strafe the wrong way round: the wiring follows
             vy = -vy
-        dt, t, reason = 0.02, 0.0, None
-        while t < duration - 1e-9:
+        w_full = math.radians(m["turn_left_dps"]) * e.turn       # the turn power's rate, for the heading hold
+        gyro = self.gyro
+        turning = kind in ("left", "right")
+        closed_turn = gyro is not None and turning and turn_rad is not None
+        limit = 2.0 * duration + 0.5 if closed_turn else duration
+        zero = gyro.peek() if gyro is not None else None
+        turned, at_stop = 0.0, 0.0
+        cur = [0.0, 0.0, 0.0]
+        dt, t, t_stop, reason, commanding, k = 0.02, 0.0, None, None, True, 0
+        coast = max(4.0 * e.spin_up_s, TURN_COAST_S if closed_turn else 0.0)
+        while True:
+            if commanding:
+                if gyro is not None:
+                    turned = gyro.peek() - zero
+                if t >= limit - 1e-9 or (closed_turn and self.turn_done(turned, turn_rad)):
+                    commanding = False
+                elif kind == "forward" and k % 2 == 0 and k > 0:
+                    self.travel = m["forward_mps"] * t
+                    reason = self.safety_reason()
+                    if reason:
+                        commanding = False
+                if not commanding:
+                    t_stop, at_stop = t, turned
+            elif t - t_stop >= coast - 1e-9:
+                break
+            if commanding and t >= e.start_delay_s:
+                hold = self.hold_correction(turned) if gyro is not None and not turning else 0.0
+                cmd = (vx, vy, wz + hold * w_full)
+            else:
+                cmd = (0.0, 0.0, 0.0) if not commanding else tuple(cur)
+            a = 1.0 if e.spin_up_s <= 0 else min(1.0, dt / e.spin_up_s)
+            cur = [c + (g - c) * a for c, g in zip(cur, cmd)]
             x, y, yaw = self.world.truth
-            yaw += wz * dt + (math.radians(e.drift_deg_per_m) * vx * dt if kind == "forward" else 0.0)
-            yaw -= math.radians(e.strafe_yaw_deg_per_m) * vy * dt
-            x += (vx * math.cos(yaw) - vy * math.sin(yaw)) * dt
-            y += (vx * math.sin(yaw) + vy * math.cos(yaw)) * dt
+            yaw += cur[2] * dt + (math.radians(e.drift_deg_per_m) * cur[0] * dt if cur[0] > 0 else 0.0)
+            yaw -= math.radians(e.strafe_yaw_deg_per_m) * cur[1] * dt
+            x += (cur[0] * math.cos(yaw) - cur[1] * math.sin(yaw)) * dt
+            y += (cur[0] * math.sin(yaw) + cur[1] * math.cos(yaw)) * dt
             what = self.world.hits(x, y, yaw)
             if what:
                 raise Abort(f"SIM COLLISION: {kind} into {what} at x={x:.3f} y={y:.3f}")
             self.world.place(x, y, yaw)
             self.world.tick(dt)
             t += dt
-            if kind == "forward" and int(round(t / dt)) % 2 == 0:
-                self.travel = m["forward_mps"] * t
-                reason = self.safety_reason()
-                if reason:
-                    break
+            k += 1
         self.travel = 0.0
+        if closed_turn:
+            self.learn_coast(at_stop, gyro.peek() - zero)
         self.moves += 1
         if self.moves > self.max_moves:
             raise Abort(f"SIM: more than {self.max_moves} moves; stuck")
-        self.dead_reckon(kind, t)
+        elapsed = t_stop
+        self.dead_reckon(kind, elapsed)
         if self.pose is not None:  # how wrong the car's idea of where it is, against the truth
             tx, ty, tyaw = self.world.truth
             self.pose_errors.append((math.hypot(self.pose.x - tx, self.pose.y - ty),
                                      abs(math.degrees(math.atan2(math.sin(self.pose.yaw - tyaw),
                                                                  math.cos(self.pose.yaw - tyaw))))))
-        return t, reason
+        return elapsed, reason

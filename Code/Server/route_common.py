@@ -56,6 +56,9 @@ MEASURE_NOISE_M = 0.02  # how far apart two looks put the same block edge
 # number: the plan puts the edge 3 cm off, and a look that reads it 0.5 cm closer would stop the car on the block it is
 # passing. The stop margin is the planning margin less the noise.
 PATH_MARGIN_M = CLEAR_MARGIN_M - MEASURE_NOISE_M
+HOLD_FULL_DEG = 6.0    # gyro heading hold during drives and strafes: this heading error gets HOLD_MAX of the turn power
+HOLD_MAX = 0.6         # ... at most this share of turn_pwm is added (the move itself keeps going)
+TURN_COAST_S = 0.15    # after a gyro turn stops, wait this long: the car still turns a little, the gyro counts it
 EDGE_PAN_DEG = 25.0    # the ultrasonic also looks this far to each side for the edges of the path (15 missed a block 3 cm in)
 
 
