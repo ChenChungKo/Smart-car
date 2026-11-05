@@ -13,7 +13,7 @@ Per move: stand still 1 s, move 1.5 s, stand still 1 s. The three distances alon
   imu         the accelerometer, bias taken from the still second before, integrated twice; the speed is forced to 0 at
               the end of the move (the car is standing still again), which removes the part of the bias error that grows
               like a ramp. Car axes from the IMU: forward = -X, left = -Y.
-The raw samples and the windows go to route_follow_debug/imu/motion_<time>.csv/.json for offline work.
+Every IMU field of every frame and the windows go to route_follow_debug/imu/motion_<time>.csv/.json for offline work.
 """
 import argparse
 import csv
@@ -54,8 +54,9 @@ class Recorder:
             s = self.imu.latest()
             if s is not None and s is not last:
                 last = s
-                # car frame: forward = -X_imu, left = -Y_imu; acceleration in m/s^2
-                self.rows.append((s.t, -s.acc_g[0] * G, -s.acc_g[1] * G, s.acc_g[2] * G, s.gyro_dps[2]))
+                # car frame: forward = -X_imu, left = -Y_imu; acceleration in m/s^2; then every raw field
+                self.rows.append((s.t, -s.acc_g[0] * G, -s.acc_g[1] * G, s.acc_g[2] * G, s.gyro_dps[2],
+                                  *s.acc_g, *s.gyro_dps, *s.rpy_deg, *s.mag_gauss, s.mag_level, s.temperature_c))
             time.sleep(0.004)
 
     def window(self, t0: float, t1: float) -> np.ndarray:
@@ -136,7 +137,9 @@ def main() -> None:
                       f"{st.median(abs(r['ultrasonic_cm']) for r in rows):.0f} cm, {len(rows)} trials)")
         with open(out / f"motion_{stamp}.csv", "w", newline="") as f:
             w = csv.writer(f)
-            w.writerow(["t_monotonic", "car_x_acc_ms2", "car_y_acc_ms2", "acc_z_ms2", "gyro_z_dps"])
+            w.writerow(["t_monotonic", "car_x_acc_ms2", "car_y_acc_ms2", "acc_z_ms2", "gyro_z_dps",
+                        "acc_x_g", "acc_y_g", "acc_z_g", "gyro_x_dps", "gyro_y_dps", "gyro_z_dps_raw", "roll_deg",
+                        "pitch_deg", "yaw_deg", "mag_x_G", "mag_y_G", "mag_z_G", "mag_level", "temp_c"])
             w.writerows(rec.rows)
         (out / f"motion_{stamp}.json").write_text(json.dumps(results, indent=1) + "\n")
         print(f"\nsaved {out}/motion_{stamp}.csv and .json", flush=True)
