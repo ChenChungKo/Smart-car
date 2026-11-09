@@ -29,8 +29,8 @@
     "position": "left",
     "model": "BL 1080p S10",
     "interface": "usb",
-    "device": "/dev/video37",
-    "usb_bus": "usb-xhci-hcd.1-1",
+    "device": "/dev/video18",
+    "usb_bus": "usb-xhci-hcd.0-2",
     "sensor": "OV2710 (ELP 同級)",
     "lens_type": "fisheye",
     "calibration_mode": "fisheye",
@@ -44,14 +44,14 @@
     "model": "BL 1080p S10",
     "interface": "usb",
     "device": "/dev/video0",
-    "usb_bus": "usb-xhci-hcd.0-2",
+    "usb_bus": "usb-xhci-hcd.1-1",
     "sensor": "OV2710 (ELP 同級)",
     "lens_type": "fisheye",
     "calibration_mode": "fisheye",
     "native_resolution": [1920, 1080],
     "recommended_capture": [640, 480],
     "fov_deg": 180,
-    "notes": "右側。視覺自走低頻抽幀防側撞。usb_bus=usb-xhci-hcd.0-2（目前 /dev/video0；勿用 CSI 的 video10）。"
+    "notes": "右側。視覺自走低頻抽幀防側撞。usb_bus=usb-xhci-hcd.1-1（2026-11-09 起；目前 /dev/video0；勿用 CSI 的 video10）。"
   },
   "rear": {
     "position": "rear",
