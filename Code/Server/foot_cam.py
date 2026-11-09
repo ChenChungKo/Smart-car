@@ -101,16 +101,23 @@ class FootCamera:
         norm = cv2.fisheye.undistortPoints(pts, self.k, self.d).reshape(-1, 2)
         return np.column_stack([norm, np.ones(len(norm))])
 
-    def project(self, pixels: np.ndarray, pan_deg: float) -> np.ndarray:
-        """Floor points (car frame, m) for pixels; NaN where the ray does not reach the floor."""
+    def project(self, pixels: np.ndarray, pan_deg: float, tilt: tuple[float, float] = (0.0, 0.0)) -> np.ndarray:
+        """Floor points (car frame, m) for pixels; NaN where the ray does not reach the floor.
+
+        tilt: (nose up, right side up) of the car in degrees, from the IMU: the floor plane is level, the car need not be."""
         if len(pixels) == 0:
             return np.zeros((0, 2))
         t = car_from_camera(self.mount(pan_deg))
-        rays = (t[:3, :3] @ self.rays(pixels).T).T
+        p, r = math.radians(tilt[0]), math.radians(tilt[1])
+        pitch = np.array([[math.cos(p), 0.0, -math.sin(p)], [0.0, 1.0, 0.0], [math.sin(p), 0.0, math.cos(p)]])
+        roll = np.array([[1.0, 0.0, 0.0], [0.0, math.cos(r), math.sin(r)], [0.0, -math.sin(r), math.cos(r)]])
+        level = pitch @ roll
+        rays = (level @ t[:3, :3] @ self.rays(pixels).T).T
+        origin = level @ t[:3, 3]
         out = np.full((len(rays), 2), np.nan)
         down = rays[:, 2] < -1e-3
-        scale = -t[2, 3] / rays[down, 2]
-        out[down] = t[:2, 3] + scale[:, None] * rays[down, :2]
+        scale = -origin[2] / rays[down, 2]
+        out[down] = origin[:2] + scale[:, None] * rays[down, :2]
         return out
 
     def _column_angles(self) -> np.ndarray:
@@ -180,21 +187,21 @@ class FootCamera:
             return HEIGHT if foot >= HEIGHT - 3 else foot
         return -1
 
-    def observe(self, bgr: np.ndarray, pan_deg: float, keep_frame: bool = False) -> FootView:
+    def observe(self, bgr: np.ndarray, pan_deg: float, keep_frame: bool = False, tilt: tuple[float, float] = (0.0, 0.0)) -> FootView:
         """Foot points of one frame, taken with the gimbal at `pan_deg` (+ = left)."""
         cols, rows = self.feet(bgr)
         usable = np.abs(self.angles) <= VIEW_DEG
         seen = (rows >= 0) & (rows < HEIGHT) & usable
         pts = np.full((len(cols), 2), np.nan)
         if seen.any():
-            pts[seen] = self.project(np.column_stack([cols[seen], rows[seen]]), pan_deg)
+            pts[seen] = self.project(np.column_stack([cols[seen], rows[seen]]), pan_deg, tilt)
         m = self.mount(pan_deg)
         reach = np.hypot(pts[:, 0] - m["x_m"], pts[:, 1] - m["y_m"])
         pts[~(reach < MAX_RANGE_M)] = np.nan
         blind = (rows == HEIGHT) & usable
         close = np.zeros((0, 2))
         if blind.any():
-            close = self.project(np.column_stack([cols[blind], np.full(int(blind.sum()), HEIGHT - 1)]), pan_deg)
+            close = self.project(np.column_stack([cols[blind], np.full(int(blind.sum()), HEIGHT - 1)]), pan_deg, tilt)
             close = close[~np.isnan(close[:, 0])]
         return FootView(pan_deg, cols, rows, pts, close, usable, bgr.copy() if keep_frame else None)
 

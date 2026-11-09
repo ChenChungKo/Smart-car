@@ -98,7 +98,7 @@ def create_app(hub: Hub, arena: dict, car: dict) -> Flask:
                 items.append((name, mounts[name], got[0]))
         if not items:
             return "no camera picture", 503
-        ok, buf = cv2.imencode(".jpg", mapper.mosaic(items), [cv2.IMWRITE_JPEG_QUALITY, 90])
+        ok, buf = cv2.imencode(".jpg", mapper.mosaic(items, filled=len(items) == 4), [cv2.IMWRITE_JPEG_QUALITY, 90])
         return Response(buf.tobytes(), mimetype="image/jpeg", headers={"Cache-Control": "no-store"})
 
     @app.route("/stream/<name>")

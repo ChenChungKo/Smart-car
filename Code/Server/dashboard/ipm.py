@@ -4,6 +4,7 @@ blocks stretch away where they stand up."""
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -15,6 +16,9 @@ MIN_OVERLAP_CELLS = 300
 MARGIN_M = 0.20            # the picture reaches this far beyond the body edge on every side
 MIN_DEPRESSION_DEG = 12.0  # a camera shows the floor only where it looks down at it by this much: lower, one pixel covers many cm
 RES_M = 0.002              # 3 mm per picture pixel: finer than the cameras see the floor
+FILL_SCALE = 4             # the floor no camera sees is filled from around it, on a picture this many times smaller
+EGO_DIR = Path(__file__).parent / "ego"           # per camera, the pixels that show the car itself (tools/ego_masks.py)
+CAR_PICTURE = Path(__file__).parent / "car_top.png"  # the car seen from above, with its outline as alpha
 
 
 class GroundMapper:
@@ -25,11 +29,18 @@ class GroundMapper:
         self.x_range = (-body[0] / 2 - MARGIN_M, body[0] / 2 + MARGIN_M)   # m ahead of the car centre: bottom to top
         self.y_range = (-body[1] / 2 - MARGIN_M, body[1] / 2 + MARGIN_M)   # m to the left: right edge to left edge
         self.maps: dict = {}
+        self.car_picture = None
         xs = np.arange(self.x_range[1], self.x_range[0], -RES_M)          # top row = furthest ahead
         ys = np.arange(self.y_range[1], self.y_range[0], -RES_M)          # left column = most left
         gy, gx = np.meshgrid(ys, xs)                            # (rows, cols)
         self.shape = gx.shape
         self.ground = np.stack([gx, gy, np.zeros_like(gx)], axis=-1).reshape(-1, 3)
+
+    @staticmethod
+    def _ego(camera: str, w: int, h: int):
+        """The pixels of this camera that show the car: they stand above the floor and are no floor to project."""
+        mask = cv2.imread(str(EGO_DIR / f"{camera}.png"), cv2.IMREAD_GRAYSCALE)
+        return None if mask is None else cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST) > 0
 
     def _build(self, camera: str, mount: dict, w: int, h: int):
         k, d = self.loc.kd(camera, w, h)
@@ -48,6 +59,10 @@ class GroundMapper:
         height = float(self.car_from_camera(mount)[2, 3])
         dist = np.hypot(self.ground[:, 0] - cam_xy[0], self.ground[:, 1] - cam_xy[1])
         ok &= np.degrees(np.arctan2(height, dist)) >= MIN_DEPRESSION_DEG
+        ego = self._ego(camera, w, h)
+        if ego is not None:
+            idx = np.flatnonzero(ok)
+            ok[idx] = ~ego[proj[idx, 1].astype(int), proj[idx, 0].astype(int)]
         weight = np.where(ok, height / (dist ** 2 + height ** 2), 0.0).reshape(self.shape).astype(np.float32)
         mx = proj[:, 0].reshape(self.shape).astype(np.float32)
         my = proj[:, 1].reshape(self.shape).astype(np.float32)
@@ -85,9 +100,37 @@ class GroundMapper:
             gains = [np.clip(np.exp(g[k]), 0.7, 1.4).astype(np.float32) for k in range(n)]
         return gains
 
-    def mosaic(self, items: list) -> np.ndarray:
+    @staticmethod
+    def _fill_unseen(out: np.ndarray, unseen: np.ndarray) -> np.ndarray:
+        """Paint the floor no camera sees from the floor around it. For showing only: nothing is known there."""
+        hole = cv2.dilate(unseen.astype(np.uint8) * 255, np.ones((9, 9), np.uint8))
+        h, w = out.shape[:2]
+        size = (w // FILL_SCALE, h // FILL_SCALE)
+        small = cv2.inpaint(cv2.resize(out, size, interpolation=cv2.INTER_AREA),
+                            cv2.resize(hole, size, interpolation=cv2.INTER_NEAREST), 9, cv2.INPAINT_TELEA)
+        fill = cv2.GaussianBlur(cv2.resize(small, (w, h), interpolation=cv2.INTER_CUBIC), (0, 0), 7)
+        alpha = cv2.GaussianBlur((hole > 0).astype(np.float32), (0, 0), 3)[..., None]
+        return (out * (1.0 - alpha) + fill * alpha).astype(np.uint8)
+
+    def _paste_car(self, out: np.ndarray, centre: tuple[int, int], width_px: int) -> bool:
+        """The photo of the car in the middle of the picture, as wide as the body. False when there is no photo."""
+        if self.car_picture is None:
+            self.car_picture = cv2.imread(str(CAR_PICTURE), cv2.IMREAD_UNCHANGED)
+            if self.car_picture is None:
+                return False
+            self.car_picture = cv2.resize(self.car_picture, None, fx=width_px / self.car_picture.shape[1],
+                                          fy=width_px / self.car_picture.shape[1], interpolation=cv2.INTER_AREA)
+        h, w = self.car_picture.shape[:2]
+        top, left = centre[1] - h // 2, centre[0] - w // 2
+        alpha = self.car_picture[..., 3:].astype(np.float32) / 255.0
+        patch = out[top:top + h, left:left + w]
+        patch[:] = (patch * (1.0 - alpha) + self.car_picture[..., :3] * alpha).astype(np.uint8)
+        return True
+
+    def mosaic(self, items: list, filled: bool = False) -> np.ndarray:
         """items: [(camera, mount, frame)]. Where cameras overlap they are blended: the sharper one counts more, and every
-        camera counts less towards the edge of what it sees. Each camera's colour is scaled so that the overlaps agree."""
+        camera counts less towards the edge of what it sees. Each camera's colour is scaled so that the overlaps agree.
+        filled: for showing, the floor no camera sees is painted from around it and the car's photo drawn; else striped."""
         warps = [self.warp(camera, mount, frame) for camera, mount, frame in items]
         images = [img.astype(np.float32) for img, _w in warps]
         quality = np.stack([w for _img, w in warps])
@@ -107,14 +150,18 @@ class GroundMapper:
         out = cv2.resize(out, None, fx=SHOW_SCALE, fy=SHOW_SCALE, interpolation=cv2.INTER_CUBIC)   # smooth, lines stay sharp
         unseen = cv2.resize((best == 0).astype(np.uint8), (out.shape[1], out.shape[0]), interpolation=cv2.INTER_NEAREST) > 0
         yy, xx = np.indices(unseen.shape)
-        out[unseen & (((xx + yy) // 6) % 2 == 0)] = (70, 70, 70)    # striped: no camera sees this floor
+        if filled:
+            out = self._fill_unseen(out, unseen)
+        else:
+            out[unseen & (((xx + yy) // 6) % 2 == 0)] = (70, 70, 70)    # striped: no camera sees this floor
         length, width = self.body                                # x forward = up, y left = left
 
         def cell(x, y):
             return (int(round((self.y_range[1] - y) / RES_M * SHOW_SCALE)),
                     int(round((self.x_range[1] - x) / RES_M * SHOW_SCALE)))
-        cv2.rectangle(out, cell(length / 2, width / 2), cell(-length / 2, -width / 2), (80, 80, 255), 3, cv2.LINE_AA)
-        cv2.arrowedLine(out, cell(0, 0), cell(length / 2 - 0.02, 0), (80, 80, 255), 3, tipLength=0.25)
+        if not (filled and self._paste_car(out, cell(0, 0), cell(0, -width / 2)[0] - cell(0, width / 2)[0])):
+            cv2.rectangle(out, cell(length / 2, width / 2), cell(-length / 2, -width / 2), (80, 80, 255), 3, cv2.LINE_AA)
+            cv2.arrowedLine(out, cell(0, 0), cell(length / 2 - 0.02, 0), (80, 80, 255), 3, tipLength=0.25)
         for d in (0.10, 0.20):                                   # 10 and 20 cm from the body edge
             cv2.rectangle(out, cell(length / 2 + d, width / 2 + d), cell(-length / 2 - d, -width / 2 - d),
                           (150, 150, 150), 1, cv2.LINE_AA)

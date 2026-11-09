@@ -13,7 +13,7 @@ import cv2
 
 from camera_devices import resolve_usb_capture_index
 from pca9685 import PCA9685
-from servo import HOME_PATH, PAN_APPROACH, load_gimbal_home, load_right_90_pan
+from servo import HOME_PATH, PAN_APPROACH, PAN_MIN, load_gimbal_home, load_right_90_pan
 
 HERE = Path(__file__).resolve().parent
 OUT = HERE / "gimbal_manual.json"
@@ -30,10 +30,10 @@ def main() -> int:
     right_90 = load_right_90_pan(home_pan)
     start_tilt = home_tilt
     if args.pan is not None:
-        start_pan = max(0, min(180, args.pan))
-        from_pan = start_pan if args.from_pan is None else max(0, min(180, args.from_pan))
+        start_pan = max(PAN_MIN, min(180, args.pan))
+        from_pan = start_pan if args.from_pan is None else max(PAN_MIN, min(180, args.from_pan))
     elif args.side == "left":
-        start_pan = max(0, home_pan - (right_90 - home_pan))
+        start_pan = max(PAN_MIN, home_pan - (right_90 - home_pan))
         from_pan = right_90
     elif args.side == "forward":
         start_pan, from_pan = home_pan, home_pan  # start where straight ahead is now and trim from there
@@ -68,7 +68,7 @@ def main() -> int:
         # only a move to the left goes past and comes back; the same angle again does nothing.
         last = state.get("sent")
         if last != state["pan"]:
-            if (last is None or state["pan"] < last) and state["pan"] - PAN_APPROACH >= 0:
+            if (last is None or state["pan"] < last) and state["pan"] - PAN_APPROACH >= PAN_MIN:
                 pwm.set_servo_pulse(pan_ch, pulse("0", state["pan"] - PAN_APPROACH))
                 time.sleep(0.12)
             pwm.set_servo_pulse(pan_ch, pulse("0", state["pan"]))
@@ -111,7 +111,9 @@ def main() -> int:
 
     cv2.namedWindow(WIN, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(WIN, 800, 600)
-    cv2.createTrackbar("pan", WIN, start_pan, 180, on_pan)
+    cv2.createTrackbar("pan", WIN, max(start_pan, 0), 180, on_pan)
+    cv2.setTrackbarMin("pan", WIN, PAN_MIN)
+    cv2.setTrackbarPos("pan", WIN, start_pan)
     cv2.createTrackbar("tilt", WIN, start_tilt, 180, on_tilt)
     state["ready"] = True
     current = from_pan
@@ -167,7 +169,7 @@ def main() -> int:
         if key in (13, 10, ord(" ")):
             save(True)
         elif key == ord("a"):
-            state["pan"] = max(0, state["pan"] - 1)
+            state["pan"] = max(PAN_MIN, state["pan"] - 1)
             cv2.setTrackbarPos("pan", WIN, state["pan"])
             apply()
         elif key == ord("d"):

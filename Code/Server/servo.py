@@ -9,6 +9,7 @@ HOME_PATH = Path(__file__).resolve().parent / "gimbal_home.json"
 # move therefore ends coming from this many servo degrees to the left (smaller angles), so a saved
 # angle (gimbal_home.json) points the same way whenever it is used.
 PAN_APPROACH = 8
+PAN_MIN = -10   # pan's left end: the pulse formula (error 10) gives 2389 us at angle 0 and the 2500 us end of the servo at -10
 
 
 def load_gimbal_home() -> tuple[int, int]:
@@ -38,7 +39,7 @@ def load_left_90_pan() -> int | None:
         data = json.loads(HOME_PATH.read_text(encoding="utf-8"))
         if "left_90_pan" not in data:
             return None
-        return max(0, min(180, int(data["left_90_pan"])))
+        return max(PAN_MIN, min(180, int(data["left_90_pan"])))
     except Exception:
         return None
 
@@ -53,7 +54,7 @@ def servo_pan_for_bearing(home_pan: int, right_90_pan: int, pan_deg: float,
     if span == 0:
         span = 90
     angle = home_pan - float(pan_deg) * (span / 90.0)
-    return max(0, min(180, int(round(angle))))
+    return max(PAN_MIN, min(180, int(round(angle))))
 
 
 def save_gimbal_home(pan: int, tilt: int) -> Path:
@@ -113,7 +114,7 @@ class Servo:
         last = getattr(self, "pan_now", None)
         if last == angle:
             return
-        if (last is None or angle < last) and angle - PAN_APPROACH >= 0:
+        if (last is None or angle < last) and angle - PAN_APPROACH >= PAN_MIN:
             self.set_servo_pwm("0", angle - PAN_APPROACH)
             time.sleep(0.12)
         self.set_servo_pwm("0", angle)

@@ -184,14 +184,19 @@ def main() -> None:
         mounts = all_mounts(car)
         mapper = GroundMapper(loc, car_from_camera, body)
         bev = {}
-        for label, names in (("bev_all", ("front", "rear", "left", "right")), ("bev_front_rear", ("front", "rear"))):
+        all4 = ("front", "rear", "left", "right")
+        for label, names, filled in (("bev_all", all4, True), ("bev_all_real", all4, False),
+                                     ("bev_front_rear", ("front", "rear"), False)):
             items = [(n, mounts[n], frames[n]) for n in names if n in frames]
             if items:
-                cv2.imwrite(str(out / f"{label}.jpg"), mapper.mosaic(items))
+                cv2.imwrite(str(out / f"{label}.jpg"), mapper.mosaic(items, filled=filled and len(items) == 4))
                 bev[label] = [n for n, _m, _f in items]
         print("\n== 2. cameras ==")
         print(f"  pictures: {', '.join(sorted(frames))} ({len(frames)}/5);  bird's-eye: {bev}")
         summary["cameras"] = sorted(frames)
+        for cap in caps.values():      # three USB cameras streaming while the gimbal turns made the whole USB bus drop out
+            cap.release()
+        caps.clear()
         # 3. ultrasonic sweep
         print("\n== 3. ultrasonic sweep (positive = left) ==")
         print("   pan   measured   map centre        map nearest in cone   measured - map")

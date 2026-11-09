@@ -33,20 +33,20 @@
       "solved_2026_10_27": "tools/solve_mounts.py 12 個位置解出；原值 x -0.114 z 0.064 yaw 180 pitch 13.1"
     },
     "left": {
-      "x_m": 0.0225,
-      "y_m": 0.0433,
-      "z_m": 0.1186,
-      "yaw_deg": 90.5257,
-      "pitch_deg": 16.8863,
-      "note": "USB 側邊相機。2026-10-27 用 12 個尺量位置的靜態資料解出（tools/solve_mounts.py）：位置靠近車中心（y 約 ±4 cm）、高約 11-12 cm，裝在雲台支架附近，不是車身兩側。"
+      "x_m": 0.0202,
+      "y_m": 0.0446,
+      "z_m": 0.1155,
+      "yaw_deg": 91.1427,
+      "pitch_deg": 18.1103,
+      "note": "USB 側邊相機。2026-11-09 調整高度後用 9 個尺量位置重新解出（tools/solve_mounts.py cal2）。"
     },
     "right": {
-      "x_m": 0.0296,
-      "y_m": -0.0424,
-      "z_m": 0.1122,
-      "yaw_deg": -91.9772,
-      "pitch_deg": 14.631,
-      "note": "USB 側邊相機。2026-10-27 用 12 個尺量位置的靜態資料解出（tools/solve_mounts.py）：位置靠近車中心（y 約 ±4 cm）、高約 11-12 cm，裝在雲台支架附近，不是車身兩側。"
+      "x_m": 0.0272,
+      "y_m": -0.0475,
+      "z_m": 0.1223,
+      "yaw_deg": -90.7782,
+      "pitch_deg": 15.9659,
+      "note": "USB 側邊相機。2026-11-09 調整高度後用 9 個尺量位置重新解出（tools/solve_mounts.py cal2）。"
     }
   },
   "max_off_axis_deg": 75.0,
@@ -87,5 +87,9 @@
     "port": "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0",
     "gyro_z_scale": 1.0,
     "note": "2026-11-03 checked against the arena tags (tools/imu_live.py --align, route_follow_debug/imu/align_20261103.txt): 7 counter-clockwise turns of 41-50 deg, 318 deg in all; the raw gyro z agrees with the tags to 0.03 % (per turn 0-1.9 % short, std 0.7 %), so the scale is 1.000. The earlier 0.989 came from turning the car by hand back to where it started, which overshot by about 1 %. Clockwise turns not checked against the tags yet. Axes: IMU X = car rear, Y = car right, Z = up (z gyro + = counter-clockwise)."
+  },
+  "nav": {
+    "gimbal_pitch_deg": -3.37,
+    "note": "2026-11-09 nav/perception.py：雲台相機俯角，含 IMU 傾斜修正，MG90S 換裝後用 B1 正面 x=65 cm 單點解出；只有 nav 使用，gimbal_camera.pitch_deg 給舊流程。"
   }
 }
