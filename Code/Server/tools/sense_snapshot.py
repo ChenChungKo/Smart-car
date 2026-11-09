@@ -31,7 +31,7 @@ SERVER = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SERVER))
 sys.path.insert(0, str(SERVER / "tools"))
 from aruco_localizer import ArucoLocalizer, CAR_PATH, MAP_PATH, car_from_camera, load_json, open_grabbers  # noqa: E402
-from static_survey import open_usb, read_with_timeout, set_pan  # noqa: E402
+from static_survey import fresh_read, open_usb, read_with_timeout, set_pan  # noqa: E402
 
 LAP_BLOCKS = ["65,75,0,20", "120,139,65,75", "65,75,120,140", "0,20,65,75"]   # the lap layout, cm x0,x1,y0,y1
 PANS = list(range(-90, 91, 15))
@@ -173,8 +173,7 @@ def main() -> None:
             if frame is not None:
                 frames[name] = frame.copy()
         for name, cap in caps.items():
-            for _ in range(3):
-                ok, frame = cap.read()
+            ok, frame = fresh_read(cap)
             if ok:
                 frames[name] = frame.copy()
         for name, frame in frames.items():

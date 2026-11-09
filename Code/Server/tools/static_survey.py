@@ -37,6 +37,8 @@ SERVER = Path(__file__).resolve().parents[1]
 OUT = SERVER / "route_follow_debug" / "survey"
 USB_CAMERAS = ("gimbal", "left", "right")
 SONIC_ANGLES = (90, 60, 30, 0, -30, -60, -90)
+WARMUP_S = 2.0   # auto exposure and white balance settle (measured: about 1 s after opening)
+FLUSH_S = 0.4    # longer than the frames the driver queues while nobody reads (4 at 30 fps)
 
 
 def usb_path(bus: str) -> Path:
@@ -55,10 +57,22 @@ def open_usb(hardware: dict) -> dict:
         if not cap.isOpened():
             print(f"  WARNING: {name} ({path.name}) did not open", flush=True)
             continue
-        for _ in range(8):  # auto exposure settles
-            cap.read()
+        fresh_read(cap, WARMUP_S)
         caps[name] = cap
     return caps
+
+
+def fresh_read(cap, seconds: float = FLUSH_S):
+    """Read for `seconds` and return the last frame. A USB camera nobody reads keeps the frames the driver queued
+    back then (dark and off-colour right after opening, or from where the car stood before): those are read away."""
+    ok, frame = False, None
+    end = time.monotonic() + seconds
+    while True:
+        got, f = cap.read()
+        if got:
+            ok, frame = True, f
+        if time.monotonic() >= end:
+            return ok, frame
 
 
 def read_with_timeout(read, timeout: float = 1.5):
@@ -140,6 +154,8 @@ def car_pose_from_fixes(fixes) -> tuple[float, float, float] | None:
 def capture(loc, grabbers, caps, servo, sensors, pose, folder: Path, hardware_ok: bool) -> None:
     folder.mkdir(parents=True, exist_ok=True)
     frames = {name: [] for name in ("front", "rear") + USB_CAMERAS}
+    for cap in caps.values():
+        fresh_read(cap)
     for _ in range(3):
         for name, grabber in grabbers.items():
             frame, _stamp = grabber.latest()
