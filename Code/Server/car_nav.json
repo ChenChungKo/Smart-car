@@ -65,7 +65,26 @@
     "strafe_pwm": 1200,
     "strafe_mps": 0.165,
     "drift_left_deg_per_m": 0.8,
-    "calibrated": true
+    "calibrated": true,
+    "turn_curve_pwm_dps": [
+      [
+        500,
+        0.0
+      ],
+      [
+        550,
+        14.7
+      ],
+      [
+        700,
+        41.5
+      ],
+      [
+        900,
+        49.2
+      ]
+    ],
+    "turn_curve_note": "2026-11-11 陀螺儀實測原地轉：PWM 450 以下完全不轉，550 起才動（電池 7.63 V）。patrol/drive.py 用這條曲線把轉速換成 PWM。"
   },
   "gimbal_camera": {
     "pivot_x_m": 0.08,
@@ -91,5 +110,18 @@
   "nav": {
     "gimbal_pitch_deg": -3.37,
     "note": "2026-11-09 nav/perception.py：雲台相機俯角，含 IMU 傾斜修正，MG90S 換裝後用 B1 正面 x=65 cm 單點解出；只有 nav 使用，gimbal_camera.pitch_deg 給舊流程。"
+  },
+  "gimbal_tags": {
+    "pivot_x_m": 0.09426,
+    "pivot_y_m": -0.00088,
+    "radius_m": 0.04162,
+    "phase_deg": 11.82963,
+    "z_m": 0.10755,
+    "scale_left": 0.98448,
+    "scale_right": 0.97537,
+    "yaw0_deg": -0.76044,
+    "pitch_deg": 4.8837,
+    "roll_deg": 1.80457,
+    "note": "2026-11-11 tools/solve_gimbal.py：14 個位置（場地中央 6 個以前後相機標籤為基準，靠牆 8 個以超音波量兩面牆＋陀螺儀為基準）。留一驗證：位置平均 1.2 最大 1.8 cm，車頭平均 0.9 最大 2.4 度。只用中央資料解出的模型在靠牆處誤差 4.6 cm，所以靠牆資料不可少。"
   }
 }

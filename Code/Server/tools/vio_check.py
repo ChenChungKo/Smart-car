@@ -64,7 +64,11 @@ class TagLogger:
                 idle = False
                 fixes = [f for f in loc.observe(name, frame)[0] if f.usable]
                 pose = loc.fuse(fixes, stamp) if fixes else None
-                self.rows.append(dict(t=stamp, camera=name, seen=len(fixes), pose=None if pose is None else dict(
+                weak = None
+                if pose is None and fixes:      # one far tag: no joint fit, but its own pose is still a (loose) measurement
+                    near = min(fixes, key=lambda f: f.distance)
+                    weak = dict(x=near.x, y=near.y, yaw=near.yaw, tags=1, nearest=near.distance, rms=near.err_px)
+                self.rows.append(dict(t=stamp, camera=name, seen=len(fixes), weak=weak, pose=None if pose is None else dict(
                     x=pose.x, y=pose.y, yaw=pose.yaw, tags=len({f.tag_id for f in pose.fixes}),
                     nearest=min(f.distance for f in pose.fixes), rms=pose.rms_px if hasattr(pose, "rms_px") else None)))
             if idle:

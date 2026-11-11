@@ -48,11 +48,13 @@ class VioFilter:
         q_yaw = (self.GYRO_SCALE_NOISE * omega * dt) ** 2 + self.GYRO_BIAS_NOISE ** 2 * dt
         self.P = F @ self.P @ F.T + np.diag([q_pos, q_pos, q_yaw, self.SCALE_DRIFT ** 2 * dt, self.SCALE_DRIFT ** 2 * dt])
 
-    def update_tags(self, x: float, y: float, yaw: float, tag_count: int, nearest_m: float, speed: float = 0.0) -> bool:
+    def update_tags(self, x: float, y: float, yaw: float, tag_count: int, nearest_m: float, speed: float = 0.0,
+                    sigma_scale: float | None = None) -> bool:
         """One pose from the tags of one picture. False: too far from the prediction, not used."""
         sigma_xy, sigma_yaw = tag_noise(tag_count, nearest_m)
-        sigma_xy = math.hypot(sigma_xy * self.tag_sigma, speed * self.TIMING_S)
-        sigma_yaw *= self.tag_sigma
+        scale = self.tag_sigma if sigma_scale is None else sigma_scale
+        sigma_xy = math.hypot(sigma_xy * scale, speed * self.TIMING_S)
+        sigma_yaw *= scale
         H = np.hstack([np.eye(3), np.zeros((3, 2))])
         R = np.diag([sigma_xy ** 2, sigma_xy ** 2, sigma_yaw ** 2])
         y_ = np.array([x, y, yaw], float) - self.x[:3]
@@ -68,7 +70,8 @@ class VioFilter:
         self.fused += 1
         return True
 
-    def update_wall(self, sensor_ahead_m: float, pan: float, range_m: float, arena_m: tuple, gate_m: float = 0.06) -> bool:
+    def update_wall(self, sensor_ahead_m: float, pan: float, range_m: float, arena_m: tuple, gate_m: float = 0.06,
+                    sigma_m: float = 0.02) -> bool:
         """An ultrasonic echo that matches the wall the pose expects corrects the pose; anything else says nothing here."""
         def expected(st) -> float:
             ox, oy = st[0] + sensor_ahead_m * math.cos(st[2]), st[1] + sensor_ahead_m * math.sin(st[2])
@@ -81,7 +84,7 @@ class VioFilter:
             d = self.x.copy()
             d[n] += 1e-3
             H[n] = (expected(d) - z) / 1e-3
-        S = float(H @ self.P @ H) + 0.02 ** 2
+        S = float(H @ self.P @ H) + sigma_m ** 2
         K = self.P @ H / S
         self.x += K * (range_m - z)
         self.x[2] = wrap(float(self.x[2]))
