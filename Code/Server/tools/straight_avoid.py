@@ -15,7 +15,8 @@ a line: the ultrasonic looks ahead while driving and the gimbal camera looks for
   past     drives on, the ultrasonic turned to the right, until it has seen the far end and the tail is past it
   back     strafes right to the line, watching the side
 Pose: gyro, motor speed, every tag pose (vio.py). The heading is held all the time.
-Output: route_follow_debug/straight/<time>/ console.log, log.json.
+Output: route_follow_debug/straight/<time>/ console.log, log.json; while it runs also control.jsonl (the pose every 0.05 s)
+and plans.jsonl (each line), the same format as the patrol, so the IMU viewer's map (tools/map_panel.py) follows the car.
 """
 import argparse
 import json
@@ -117,9 +118,36 @@ def main() -> None:
     rows, events = [], []
     margin, stop_at = opts.margin / 100.0, opts.stop_at / 100.0
 
+    # live output for the map in the IMU viewer (tools/map_panel.py): same rows as patrol/navigator.py writes
+    live = dict(t0=time.monotonic(), last=0.0, note="", goal="",
+                ctrl=open(out / "control.jsonl", "w", encoding="utf-8", buffering=1),
+                plans=open(out / "plans.jsonl", "w", encoding="utf-8", buffering=1))
+
     def say(text: str) -> None:
         events.append(text)
+        live["note"] = text
         print(text, flush=True)
+
+    def live_line(ln, name: str) -> None:
+        """The line the car is about to follow, as the 'plan' the map draws."""
+        live["goal"] = name
+        try:
+            live["plans"].write(json.dumps(dict(s=time.monotonic() - live["t0"], goal=name, path=[
+                [ln.x, ln.y, 0.0], [ln.x + ln.ux * ln.end, ln.y + ln.uy * ln.end, 0.0]])) + "\n")
+        except (OSError, ValueError):
+            pass
+
+    def live_pose(t: float, x: float, y: float, yaw: float, sigma_m: float | None, pwm) -> None:
+        if t - live["last"] < 0.05:
+            return
+        live["last"] = t
+        try:
+            live["ctrl"].write(json.dumps(dict(s=round(t - live["t0"], 3), pose=[round(x, 4), round(y, 4), round(yaw, 4)],
+                                               sigma_cm=None if sigma_m is None else round(sigma_m * 100, 2),
+                                               goal=live["goal"], why=None, note=live["note"][:80],
+                                               pwm=pwm, armed=bool(opts.arm))) + "\n")
+        except (OSError, ValueError):
+            pass
 
     try:
         car.start()
@@ -171,6 +199,7 @@ def main() -> None:
         if p is None:
             raise Abort("no pose from the tags")
         line = new_line(p.x, p.y, wrap(round(p.yaw / (math.pi / 2)) * (math.pi / 2)))
+        live_line(line, "side 1")
         say(f"pose x={p.x * 100:.1f} y={p.y * 100:.1f} yaw={math.degrees(p.yaw):+.1f} ({count} tag poses: x={p.tags_x * 100:.1f} y={p.tags_y * 100:.1f}; side echo {'used' if p.echo else 'not used'}); "
             f"line along {math.degrees(line.yaw):+.0f} deg, {line.end * 100:.0f} cm to the end")
         def echoes():
@@ -233,6 +262,8 @@ def main() -> None:
                 car.drive(tuple(int(v) for v in wheels))
             st["vx"], st["vy"] = vx, vy
             rows.append(dict(t=t, x=x, y=y, yaw=yaw, herr=herr, vx=vx, vy=vy, pwm=[int(v) for v in wheels], sy=float(f.x[4])))
+            sent = [0, 0, 0, 0] if abs(vx) + abs(vy) < 1e-4 and abs(herr) < 1.0 else [int(v) for v in wheels]
+            live_pose(t, x, y, yaw, math.sqrt(max(0.0, (f.P[0, 0] + f.P[1, 1]) / 2.0)), sent)
             time.sleep(0.012)
             return x, y, yaw
 
@@ -379,6 +410,7 @@ def main() -> None:
             if q is None:
                 raise Abort("no pose from the tags after the turn")
             line = new_line(q.x, q.y, wrap(line.yaw + math.pi / 2.0))
+            live_line(line, f"side {wall_no + 2}" if wall_no + 2 <= opts.sides else "back to the start")
             f.x[:3] = [q.x, q.y, q.yaw]
             f.P[:3, :3] = np.diag([f.START_SIGMA_M ** 2, f.START_SIGMA_M ** 2, math.radians(f.START_SIGMA_DEG) ** 2])
             st.update(seen=len(tags.rows), last=time.monotonic(), prev=car.gyro.peek(), vx=0.0, vy=0.0)
@@ -451,6 +483,8 @@ def main() -> None:
         if feed is not None:
             feed.close()
         car.close()
+        for k in ("ctrl", "plans"):
+            live[k].close()
     if rows:
         (out / "log.json").write_text(json.dumps(dict(rows=rows, events=events, tags=tags.rows)))
         e = np.array([abs(r["herr"]) for r in rows])

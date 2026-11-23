@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=車上 IMU
+Comment=開啟車上 9 軸 IMU 檢視器（自動找到 USB 孔並切到手動校正模式 0x73）
+Exec=python3 /home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server/tools/open_car_imu.py
+Path=/home/pi/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server
+Icon=applications-science
+Terminal=false
+StartupNotify=false
